@@ -1,0 +1,5 @@
+numpy>=1.26
+opencv-python>=4.10
+# Install `carla` separately to match your CARLA server version.
+# Example:
+# pip install /path/to/carla-<version>-cp310-*.whl

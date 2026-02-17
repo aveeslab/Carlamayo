@@ -1,2 +1,176 @@
-# Alpamayo-CARLA
-Running Alpamayo with CARLA simulator
+# CARLA Simulator + Nvidia Alpamayo-R1 Inference
+
+This repository intentionally contains only custom workflow files.  
+The upstream Alpamayo source code is not mixed into this repo and should be cloned separately.
+
+## Repository Scope
+
+Tracked files in this repo:
+- `data_collect.py`
+- `alpamayo_carla_open_loop.py`
+- `carla_alpamayo_closed_loop.py`
+- `requirements-carla.txt`
+- `requirements-alpamayo-inference.txt`
+- `README.md`
+
+## Recommended Folder Layout
+
+```text
+<repo-root>/
+├── data_collect.py
+├── alpamayo_carla_open_loop.py
+├── carla_alpamayo_closed_loop.py
+├── requirements-carla.txt
+├── requirements-alpamayo-inference.txt
+├── README.md
+├── carla_data/                 # generated (ignored)
+├── venv-carla/                 # local env (ignored)
+└── alpamayo/                   # upstream clone (ignored)
+    └── ar1_venv/               # Alpamayo env (created by uv)
+```
+
+## 1) CARLA Environment Setup (Data Collection)
+
+### 1-1. Install and run CARLA 0.9.16 (Quick Install)
+
+```bash
+mkdir -p ~/carla && cd ~/carla
+wget https://github.com/carla-simulator/carla/releases/download/0.9.16/CARLA_0.9.16.tar.gz
+tar -xzf CARLA_0.9.16.tar.gz
+cd CARLA_0.9.16
+./CarlaUE4.sh
+```
+
+### 1-2. Create CARLA Python environment
+
+```bash
+python3.10 -m venv venv-carla
+source venv-carla/bin/activate
+pip install -r requirements-carla.txt
+```
+
+Install the CARLA Python API wheel matching your CARLA server version:
+
+```bash
+pip install /path/to/carla-0.9.16-cp310-*.whl
+```
+
+
+## 2) Alpamayo Environment Setup (Inference)
+
+Clone upstream Alpamayo as-is into `alpamayo/` (do not edit it here):
+
+```bash
+git clone https://github.com/NVlabs/alpamayo.git alpamayo
+```
+
+### 2-1. Original Alpamayo setup
+
+```bash
+cd alpamayo
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv venv ar1_venv
+source ar1_venv/bin/activate
+uv sync --active
+```
+
+### 2-2. Install additional packages for this workflow
+
+```bash
+cd ..
+uv pip install -r requirements-alpamayo-inference.txt
+```
+
+### 2-3. Closed-loop environment (Alpamayo + CARLA in one env)
+
+If you run `carla_alpamayo_closed_loop.py`, create a dedicated env:
+
+```bash
+cd alpamayo
+uv venv ar1_carla_venv
+source ar1_carla_venv/bin/activate
+uv sync --active
+python -m ensurepip --upgrade
+python -m pip install carla==0.9.16
+python -m pip install -r ../requirements-alpamayo-inference.txt -r ../requirements-carla.txt
+```
+
+If `agents.navigation.controller` is not found, set:
+
+```bash
+export CARLA_ROOT=/path/to/CARLA_0.9.16
+```
+
+### 2-4. Authenticate with HuggingFace
+
+The model requires access to gated resources. Request access here:
+- 🤗 [Physical AI AV Dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
+- 🤗 [Alpamayo Model Weights](https://huggingface.co/nvidia/Alpamayo-R1-10B)
+
+Then authenticate using the HuggingFace CLI:
+
+```bash
+# Install huggingface-cli if not already installed (included in transformers)
+pip install huggingface_hub
+
+# Login with your token
+huggingface-cli login
+```
+
+Get your access token at: https://huggingface.co/settings/tokens
+
+> 💡 **Tip**: For more details on HuggingFace authentication, see the [official documentation](https://huggingface.co/docs/huggingface_hub/guides/cli).
+
+
+## 3) Open-Loop Inference
+
+
+Run Data collection:
+
+```bash
+source venv-carla/bin/activate
+python data_collect.py
+```
+
+Outputs:
+- `carla_data/trajectory.json`
+- `carla_data/cam_*/<frame>.jpg`
+- `carla_data/lidar_top/<frame>.ply`
+
+Run Open-loop Test:
+
+```bash
+source alpamayo/ar1_venv/bin/activate
+# Default: full-precision model (requires high VRAM)
+python alpamayo_carla_open_loop.py
+
+# Optional: quantized 4-bit mode
+python alpamayo_carla_open_loop.py --quantization
+```
+
+Output:
+- `carla_alpamayo_open_loop_result.mp4`
+
+## 4) Closed-Loop Inference
+
+Run (default, no extra options):
+
+```bash
+source alpamayo/ar1_carla_venv/bin/activate
+python carla_alpamayo_closed_loop.py
+```
+
+Additional options:
+
+```bash
+# Save frame-level debug logs
+python carla_alpamayo_closed_loop.py --debug-log debug_logs/closed_loop_run.jsonl
+
+# Quantized model
+python carla_alpamayo_closed_loop.py --quantization
+
+```
+
+Output:
+- `carla_alpamayo_closed_loop_result.mp4`
