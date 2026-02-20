@@ -238,3 +238,7 @@ uv.lock
 CONTRIBUTING.md
 Dockerfile.jetson.jp5
 LICENSE
+
+# Keep README assets tracked
+!assets/
+!assets/*.gif

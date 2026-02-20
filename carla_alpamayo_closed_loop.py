@@ -1,14 +1,4 @@
-# CARLA Real-time Control with Alpamayo (Local)
-# CARLA + Model both run on the same PC
-#
-# Prerequisites:
-#   1. CARLA server running (./CarlaUE4.sh)
-#
-# Usage:
-#   python carla_alpamayo_closed_loop.py
-#
-# Output:
-#   - carla_alpamayo_closed_loop_result.mp4: Video with trajectory overlay and CoT
+"""CARLA closed-loop control with local Alpamayo inference (HQ recording)."""
 
 import time
 import math
@@ -16,10 +6,9 @@ import copy
 import queue
 import textwrap
 import argparse
-import json
 import os
 import sys
-from datetime import datetime
+import traceback
 import numpy as np
 import cv2
 import carla
@@ -30,7 +19,7 @@ from transformers import BitsAndBytesConfig
 
 
 def _resolve_vehicle_pid_controller():
-    """Import VehiclePIDController, auto-adding common CARLA agent paths."""
+    """Import VehiclePIDController, auto-adding env/relative CARLA agent paths."""
     try:
         from agents.navigation.controller import VehiclePIDController as _VehiclePIDController
         return _VehiclePIDController
@@ -43,16 +32,16 @@ def _resolve_vehicle_pid_controller():
         if v:
             candidate_roots.append(v)
 
-    # Common install locations
+    # Repository-relative/common local paths (no user-specific absolute paths).
     candidate_roots.extend([
-        "/home/kvva-sh/carla",
-        "/home/avees/carla",
-        "/opt/carla-simulator",
-        "/opt/carla",
+        "carla",
+        os.path.join("carla", "CARLA_0.9.16"),
+        os.path.join("..", "carla"),
+        os.path.join("..", "CARLA_0.9.16"),
     ])
 
     for root in candidate_roots:
-        agents_parent = os.path.join(root, "PythonAPI", "carla")
+        agents_parent = os.path.abspath(os.path.join(root, "PythonAPI", "carla"))
         if os.path.isdir(agents_parent) and agents_parent not in sys.path:
             sys.path.append(agents_parent)
 
@@ -80,14 +69,16 @@ NUM_HISTORY = 16
 NUM_FRAMES = 4
 NUM_TRAJ_SAMPLES = 4
 SAVE_VIDEO = True
-OUTPUT_VIDEO = "carla_alpamayo_closed_loop_result.mp4"
+OUTPUT_VIDEO = "carla_alpamayo_closed_loop_result_hq.mp4"
 VIDEO_FPS = 10
-CARLA_MAP = "Town04"  # Map to load (highway section available)
+CARLA_MAP = "Town03"  # Urban-style map
+NPC_VEHICLE_COUNT = 50
+NPC_WALKER_COUNT = 50
 
 # Control config
 CONTROL_DT = 0.1
 THROTTLE_MAX = 0.35
-BRAKE_MAX = 0.5
+BRAKE_MAX = 1.0
 CONTROL_SMOOTH_ALPHA = 0.25
 
 # Official PID follower config
@@ -114,37 +105,7 @@ def parse_args():
         action="store_true",
         help="Use 4-bit quantized model. Default is full-precision.",
     )
-    parser.add_argument(
-        "--debug-log",
-        default=None,
-        help="Path to JSONL debug log file. If omitted, a timestamped file is created.",
-    )
     return parser.parse_args()
-
-
-# ============================================================================
-# Debug Logging
-# ============================================================================
-class DebugLogger:
-    """JSONL logger for frame-level debugging."""
-
-    def __init__(self, path):
-        self.path = path
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.fh = open(path, "w", encoding="utf-8")
-
-    def log(self, event, payload):
-        record = {
-            "ts": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
-            "event": event,
-            **payload,
-        }
-        self.fh.write(json.dumps(record, ensure_ascii=True) + "\n")
-        self.fh.flush()
-
-    def close(self):
-        if self.fh:
-            self.fh.close()
 
 
 # ============================================================================
@@ -385,6 +346,15 @@ class VideoRecorder:
         """Add a frame (RGB numpy array)."""
         self.frames.append(frame)
 
+    def _create_writer(self, width, height):
+        for codec in ("avc1", "H264", "mp4v"):
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            writer = cv2.VideoWriter(self.output_path, fourcc, self.fps, (width, height))
+            if writer.isOpened():
+                return writer, codec
+            writer.release()
+        return None, None
+
     def save(self):
         """Save all frames to video."""
         if not self.frames:
@@ -393,8 +363,12 @@ class VideoRecorder:
 
         print(f"\nSaving video with {len(self.frames)} frames...")
         h, w = self.frames[0].shape[:2]
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        writer = cv2.VideoWriter(self.output_path, fourcc, self.fps, (w, h))
+        writer, selected_codec = self._create_writer(w, h)
+        if writer is None:
+            print("Failed to initialize video writer.")
+            return
+        if hasattr(cv2, "VIDEOWRITER_PROP_QUALITY"):
+            writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 100)
 
         for frame in self.frames:
             frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -402,7 +376,7 @@ class VideoRecorder:
 
         writer.release()
         print(f"Video saved: {self.output_path}")
-        print(f"  Resolution: {w}x{h}, FPS: {self.fps}, Frames: {len(self.frames)}")
+        print(f"  Codec: {selected_codec}, Resolution: {w}x{h}, FPS: {self.fps}, Frames: {len(self.frames)}")
 
 
 # ============================================================================
@@ -418,10 +392,14 @@ class CARLAInterface:
         self.sensors = {}
         self.sensor_queues = {}
         self.history_buffer = []
+        self.npc_vehicle_ids = []
+        self.npc_walker_ids = []
+        self.npc_walker_controller_ids = []
+        self.tm_port = 8000
 
         self.camera_configs = {
             "cam_front_left": {"x": 1.0, "y": -0.5, "z": 2.4, "pitch": 0.0, "yaw": -60.0, "fov": 120},
-            "cam_front_wide": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 120},
+            "cam_front_wide": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 95},
             "cam_front_right": {"x": 1.0, "y": 0.5, "z": 2.4, "pitch": 0.0, "yaw": 60.0, "fov": 120},
             "cam_front_tele": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 30},
         }
@@ -530,9 +508,93 @@ class CARLAInterface:
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = 0.1
         self.world.apply_settings(settings)
-        tm = self.client.get_trafficmanager(8000)
+        tm = self.client.get_trafficmanager(self.tm_port)
         tm.set_synchronous_mode(True)
         print("Synchronous mode enabled.")
+
+    def spawn_npcs(self, num_vehicles=NPC_VEHICLE_COUNT, num_walkers=NPC_WALKER_COUNT):
+        """Spawn traffic vehicles and pedestrians."""
+        bp_lib = self.world.get_blueprint_library()
+        traffic_manager = self.client.get_trafficmanager(self.tm_port)
+        traffic_manager.set_global_distance_to_leading_vehicle(2.0)
+        traffic_manager.global_percentage_speed_difference(0.0)
+
+        # Spawn NPC vehicles with autopilot.
+        vehicle_bps = [bp for bp in bp_lib.filter("vehicle.*") if bp.has_attribute("number_of_wheels")]
+        vehicle_bps = [bp for bp in vehicle_bps if int(bp.get_attribute("number_of_wheels")) == 4]
+        spawn_points = self.world.get_map().get_spawn_points()
+        random.shuffle(spawn_points)
+        vehicle_count = min(num_vehicles, len(spawn_points))
+        vehicle_batch = []
+        for i in range(vehicle_count):
+            bp = random.choice(vehicle_bps)
+            if bp.has_attribute("role_name"):
+                bp.set_attribute("role_name", "autopilot")
+            transform = spawn_points[i]
+            vehicle_batch.append(
+                carla.command.SpawnActor(bp, transform).then(
+                    carla.command.SetAutopilot(carla.command.FutureActor, True, self.tm_port)
+                )
+            )
+        vehicle_results = self.client.apply_batch_sync(vehicle_batch, True)
+        for res in vehicle_results:
+            if not res.error:
+                self.npc_vehicle_ids.append(res.actor_id)
+        print(f"Spawned NPC vehicles: {len(self.npc_vehicle_ids)}/{num_vehicles}")
+
+        # Spawn walkers.
+        walker_bps = bp_lib.filter("walker.pedestrian.*")
+        walker_spawn_points = []
+        attempts = 0
+        max_attempts = max(num_walkers * 5, 100)
+        while len(walker_spawn_points) < num_walkers and attempts < max_attempts:
+            loc = self.world.get_random_location_from_navigation()
+            attempts += 1
+            if loc is None:
+                continue
+            walker_spawn_points.append(carla.Transform(loc))
+
+        walker_batch = []
+        walker_speeds = []
+        for transform in walker_spawn_points:
+            bp = random.choice(walker_bps)
+            if bp.has_attribute("is_invincible"):
+                bp.set_attribute("is_invincible", "false")
+            speed = 1.4
+            if bp.has_attribute("speed"):
+                speed_values = bp.get_attribute("speed").recommended_values
+                if len(speed_values) > 1:
+                    speed = float(speed_values[1])
+            walker_speeds.append(speed)
+            walker_batch.append(carla.command.SpawnActor(bp, transform))
+
+        walker_results = self.client.apply_batch_sync(walker_batch, True)
+        spawned_walker_ids = []
+        spawned_walker_speeds = []
+        for idx, res in enumerate(walker_results):
+            if not res.error:
+                spawned_walker_ids.append(res.actor_id)
+                spawned_walker_speeds.append(walker_speeds[idx])
+        self.npc_walker_ids = spawned_walker_ids
+
+        # Spawn walker AI controllers and assign random destinations.
+        walker_controller_bp = bp_lib.find("controller.ai.walker")
+        controller_batch = [
+            carla.command.SpawnActor(walker_controller_bp, carla.Transform(), wid)
+            for wid in self.npc_walker_ids
+        ]
+        controller_results = self.client.apply_batch_sync(controller_batch, True)
+        self.npc_walker_controller_ids = [res.actor_id for res in controller_results if not res.error]
+        controller_actors = self.world.get_actors(self.npc_walker_controller_ids)
+
+        for i, controller in enumerate(controller_actors):
+            controller.start()
+            dest = self.world.get_random_location_from_navigation()
+            if dest is not None:
+                controller.go_to_location(dest)
+            controller.set_max_speed(float(spawned_walker_speeds[i] if i < len(spawned_walker_speeds) else 1.4))
+
+        print(f"Spawned NPC walkers: {len(self.npc_walker_ids)}/{num_walkers}")
 
     def spawn_ego_vehicle(self):
         print("Selecting spawn point...")
@@ -540,21 +602,9 @@ class CARLAInterface:
         vehicle_bp = bp_lib.find('vehicle.tesla.model3')
         vehicle_bp.set_attribute('role_name', 'hero')
         spawn_points = self.world.get_map().get_spawn_points()
-        best, best_score = self._select_highway_spawn_point(spawn_points)
-        if best is not None:
-            spawn_point, lane_count, span, straight_score = best
-            self.spawn_meta = {
-                "strategy": "highway_preferred",
-                "score": float(best_score),
-                "lane_count": int(lane_count),
-                "span_points": int(span),
-                "straight_score": float(straight_score),
-            }
-            print(f"Selected highway-like spawn (score={best_score:.2f}, lanes={lane_count}, span={span})")
-        else:
-            spawn_point = random.choice(spawn_points)
-            self.spawn_meta = {"strategy": "random_spawn"}
-            print("Highway-like spawn not found; using random spawn.")
+        spawn_point = random.choice(spawn_points)
+        self.spawn_meta = {"strategy": "random_spawn"}
+        print("Selected random spawn point.")
         print("Spawning ego vehicle...")
         self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
         print(f"Spawned ego vehicle at {spawn_point.location}")
@@ -569,7 +619,7 @@ class CARLAInterface:
             cam_bp.set_attribute('image_size_x', str(IMG_WIDTH))
             cam_bp.set_attribute('image_size_y', str(IMG_HEIGHT))
             cam_bp.set_attribute('fov', str(cfg['fov']))
-            cam_bp.set_attribute('enable_postprocess_effects', 'False')
+            cam_bp.set_attribute('enable_postprocess_effects', 'True')
             cam_bp.set_attribute('sensor_tick', '0.0')
 
             transform = carla.Transform(
@@ -662,15 +712,51 @@ class CARLAInterface:
 
     def cleanup(self):
         print("\nCleaning up...")
+        if self.client is None or self.world is None:
+            return
+        try:
+            self.client.get_trafficmanager(self.tm_port).set_synchronous_mode(False)
+        except Exception:
+            pass
+        if self.npc_walker_controller_ids:
+            try:
+                controllers = self.world.get_actors(self.npc_walker_controller_ids)
+                for controller in controllers:
+                    try:
+                        controller.stop()
+                    except Exception:
+                        pass
+                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.npc_walker_controller_ids])
+            except Exception:
+                pass
+        if self.npc_walker_ids:
+            try:
+                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.npc_walker_ids])
+            except Exception:
+                pass
+        if self.npc_vehicle_ids:
+            try:
+                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.npc_vehicle_ids])
+            except Exception:
+                pass
         for sensor in self.sensors.values():
-            sensor.stop()
-            sensor.destroy()
+            try:
+                sensor.stop()
+                sensor.destroy()
+            except Exception:
+                pass
         if self.ego_vehicle:
-            self.ego_vehicle.destroy()
-        settings = self.world.get_settings()
-        settings.synchronous_mode = False
-        settings.fixed_delta_seconds = None
-        self.world.apply_settings(settings)
+            try:
+                self.ego_vehicle.destroy()
+            except Exception:
+                pass
+        try:
+            settings = self.world.get_settings()
+            settings.synchronous_mode = False
+            settings.fixed_delta_seconds = None
+            self.world.apply_settings(settings)
+        except Exception:
+            pass
 
 
 # ============================================================================
@@ -801,36 +887,11 @@ def select_trajectory_by_prev_similarity(traj_samples, prev_traj):
 def main():
     args = parse_args()
     use_quantization = args.quantization
-    log_path = args.debug_log or os.path.join(
-        "debug_logs", f"closed_loop_debug_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
-    )
-    debug_logger = DebugLogger(log_path)
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo (Local)")
     print("=" * 60)
     print(f"Quantization: {'ON (4-bit)' if use_quantization else 'OFF (full-precision)'}")
-    print(f"Debug log: {log_path}")
-    debug_logger.log(
-        "session_start",
-        {
-            "quantization": bool(use_quantization),
-            "carla_map": CARLA_MAP,
-            "num_history": NUM_HISTORY,
-            "num_frames": NUM_FRAMES,
-            "controller": "official_pid",
-            "official_pid": {
-                "lookahead_min_m": PID_LOOKAHEAD_MIN_M,
-                "lookahead_max_m": PID_LOOKAHEAD_MAX_M,
-                "lookahead_speed_gain": PID_LOOKAHEAD_SPEED_GAIN,
-                "target_speed_min_kmh": PID_TARGET_SPEED_MIN_KMH,
-                "target_speed_max_kmh": PID_TARGET_SPEED_MAX_KMH,
-                "target_speed_extent_gain": PID_TARGET_SPEED_EXTENT_GAIN,
-                "lat": {"kp": PID_LAT_KP, "ki": PID_LAT_KI, "kd": PID_LAT_KD},
-                "lon": {"kp": PID_LON_KP, "ki": PID_LON_KI, "kd": PID_LON_KD},
-            },
-        },
-    )
 
     # Load model
     print("\nLoading model...")
@@ -856,12 +917,6 @@ def main():
     processor = helper.get_processor(model.tokenizer)
     print("Model loaded!")
     print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
-    debug_logger.log(
-        "model_loaded",
-        {
-            "vram_alloc_gb": float(torch.cuda.memory_allocated() / 1024**3),
-        },
-    )
 
     # Initialize CARLA
     carla_if = CARLAInterface()
@@ -873,10 +928,10 @@ def main():
         carla_if.connect()
         carla_if.load_map(CARLA_MAP)
         carla_if.spawn_ego_vehicle()
-        debug_logger.log("spawn_selected", carla_if.spawn_meta)
+        carla_if.enable_synchronous_mode()
+        carla_if.spawn_npcs(num_vehicles=NPC_VEHICLE_COUNT, num_walkers=NPC_WALKER_COUNT)
         carla_if.setup_cameras()
         time.sleep(1.0)
-        carla_if.enable_synchronous_mode()
 
         # Controller
         pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
@@ -889,7 +944,6 @@ def main():
         current_cot = ""
         current_inference_time = 0.0
         frame_buffer = []
-        inference_running = False
         prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
 
         print("\nStarting control loop...")
@@ -912,9 +966,7 @@ def main():
                 frame_buffer.pop(0)
 
             # Run inference when we have enough frames
-            if not inference_running and len(frame_buffer) >= NUM_FRAMES:
-                inference_running = True
-
+            if len(frame_buffer) >= NUM_FRAMES:
                 # Prepare images: (NUM_CAMERAS, NUM_FRAMES, H, W, C)
                 images_array = np.zeros(
                     (NUM_CAMERAS, NUM_FRAMES, IMG_HEIGHT, IMG_WIDTH, IMG_CHANNELS),
@@ -926,11 +978,11 @@ def main():
 
                 history_xyz, history_rot = carla_if.get_history_in_local_frame()
 
-                # Run inference directly (no network)
-                start_time = time.time()
+                # Measure pure model inference time only.
                 model_data = prepare_model_input(images_array, history_xyz, history_rot)
+                model_start_time = time.time()
                 pred_xyz, extra = run_inference(model, processor, model_data)
-                inference_time = time.time() - start_time
+                model_inference_time = time.time() - model_start_time
 
                 # Extract sampled trajectories and select one similar to previous frame.
                 traj_samples = extract_trajectory_samples(pred_xyz)
@@ -942,32 +994,13 @@ def main():
                 prev_selected_trajectory = current_trajectory.copy()
                 current_pred_xyz = traj_samples
                 current_cot = extract_cot_text(extra)
-                current_inference_time = inference_time
+                current_inference_time = model_inference_time
 
-                print(f"[Frame {frame_count}] Inference: {inference_time:.2f}s")
+                print(f"[Frame {frame_count}] Inference: {model_inference_time:.2f}s")
                 print(f"    CoT: {current_cot[:60]}...")
                 print(f"    Selected traj sample: {current_selected_traj_idx}/{NUM_TRAJ_SAMPLES - 1}")
                 # Debug: print first few trajectory points
                 print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
-                traj_xy = current_trajectory[:, :2]
-                traj_norm = np.linalg.norm(traj_xy, axis=1)
-                debug_logger.log(
-                    "inference",
-                    {
-                        "frame": int(frame_count),
-                        "inference_time_sec": float(inference_time),
-                        "cot_head": current_cot[:200],
-                        "num_traj_samples": int(NUM_TRAJ_SAMPLES),
-                        "selected_traj_idx": int(current_selected_traj_idx),
-                        "traj_similarity_scores_xy_l2": similarity_scores,
-                        "traj_first3_xy": traj_xy[:3].tolist(),
-                        "traj_end_xy": traj_xy[-1].tolist(),
-                        "traj_min_norm": float(np.min(traj_norm)),
-                        "traj_max_norm": float(np.max(traj_norm)),
-                    },
-                )
-
-                inference_running = False
 
             # Apply control
             if current_trajectory is not None:
@@ -990,24 +1023,6 @@ def main():
 
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
                 carla_if.apply_control(steering, throttle, brake)
-                debug_logger.log(
-                    "control",
-                    {
-                        "frame": int(frame_count),
-                        "selected_traj_idx": int(current_selected_traj_idx),
-                        "speed_mps": float(state["speed"]),
-                        "speed_kmh": float(state["speed"] * 3.6),
-                        "yaw_deg": float(state["yaw"]),
-                        "steering_raw": float(steering_raw),
-                        "steering_applied": float(steering),
-                        "throttle_raw": float(throttle_raw),
-                        "throttle": float(throttle),
-                        "brake_raw": float(brake_raw),
-                        "brake": float(brake),
-                        "control_smooth_alpha": float(CONTROL_SMOOTH_ALPHA),
-                        "controller": ctrl_debug,
-                    },
-                )
 
                 # Record visualization frame
                 if SAVE_VIDEO and current_pred_xyz is not None:
@@ -1020,46 +1035,22 @@ def main():
                     )
                     video_recorder.add_frame(vis_frame)
 
-                
                 print(f"[Frame {frame_count}] Speed: {state['speed']*3.6:.1f} km/h, "
                     f"Steer: {steering:.4f}, Throttle: {throttle:.3f}, Brake: {brake:.3f}")
             else:
                 # Before first inference: slowly move forward to build history
                 carla_if.apply_control(0.0, 0.3, 0.0)
-                debug_logger.log(
-                    "warmup_control",
-                    {
-                        "frame": int(frame_count),
-                        "speed_mps": float(state["speed"]),
-                        "speed_kmh": float(state["speed"] * 3.6),
-                        "throttle": 0.3,
-                        "steering": 0.0,
-                        "brake": 0.0,
-                    },
-                )
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
-        debug_logger.log("session_interrupted", {})
     except Exception as e:
         print(f"\nError: {e}")
-        import traceback
         traceback.print_exc()
-        debug_logger.log("session_error", {"error": str(e)})
     finally:
         # Save video before cleanup
         if SAVE_VIDEO and video_recorder:
             video_recorder.save()
-            debug_logger.log(
-                "video_saved",
-                {
-                    "output_video": OUTPUT_VIDEO,
-                    "frames": len(video_recorder.frames),
-                },
-            )
         carla_if.cleanup()
-        debug_logger.log("session_end", {})
-        debug_logger.close()
 
     print("\nStopped.")
 

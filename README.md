@@ -1,5 +1,7 @@
 # CARLA Simulator + Nvidia Alpamayo-R1 Inference
 
+![Closed-loop Demo](assets/carla_alpamayo_demo.gif)
+
 This repository intentionally contains only custom workflow files.  
 The upstream Alpamayo source code is not mixed into this repo and should be cloned separately.
 
@@ -164,9 +166,6 @@ python carla_alpamayo_closed_loop.py
 Additional options:
 
 ```bash
-# Save frame-level debug logs
-python carla_alpamayo_closed_loop.py --debug-log debug_logs/closed_loop_run.jsonl
-
 # Quantized model
 python carla_alpamayo_closed_loop.py --quantization
 
