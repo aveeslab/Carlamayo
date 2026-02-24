@@ -1,4 +1,4 @@
-# CARLA Simulator + Nvidia Alpamayo-R1 Inference
+# Nvidia Alpamayo-R1 + CARLA Simulator Inference
 
 ![Closed-loop Demo](assets/carla_alpamayo_demo.gif)
 
