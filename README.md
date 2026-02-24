@@ -51,16 +51,16 @@ source venv-carla/bin/activate
 pip install -r requirements-carla.txt
 ```
 
-Install the CARLA Python API wheel matching your CARLA server version:
+Install the CARLA Python API matching your CARLA server version:
 
 ```bash
-pip install /path/to/carla-0.9.16-cp310-*.whl
+pip install carla==0.9.16
 ```
 
 
 ## 2) Alpamayo Environment Setup (Inference)
 
-Clone upstream Alpamayo as-is into `alpamayo/` (do not edit it here):
+Clone upstream Alpamayo as-is into `alpamayo/`
 
 ```bash
 git clone https://github.com/NVlabs/alpamayo.git alpamayo
