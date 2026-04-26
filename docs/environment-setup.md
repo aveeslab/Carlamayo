@@ -96,22 +96,3 @@ export CARLA_ROOT=/path/to/CARLA_0.9.16
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
-
-## Troubleshooting
-
-### Flash Attention issues
-
-If Flash Attention 2 causes compatibility issues, use PyTorch scaled dot-product attention in your local model configuration:
-
-```python
-config.attn_implementation = "sdpa"
-```
-
-### CUDA out-of-memory errors
-
-If you encounter OOM errors:
-
-1. Try the `--quantization` option.
-2. Confirm available VRAM.
-3. Reduce `num_traj_samples` when generating multiple trajectories.
-4. Close other GPU-intensive processes.
