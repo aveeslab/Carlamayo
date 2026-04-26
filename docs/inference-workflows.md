@@ -97,31 +97,3 @@ python src/alpamayo1_5/test_inference.py
 ```
 
 To generate more trajectories and reasoning traces, increase `num_traj_samples` in the script.
-
-## Project Structure
-
-```text
-~/carla/
-├── Agents/
-├── PythonAPI/
-└── CarlaUE4.sh
-
-<repo-root>/
-├── data_collect.py
-├── carla_alpamayo_open_loop.py
-├── carla_alpamayo_closed_loop.py
-├── module/
-│   ├── config.py
-│   ├── pid_controller.py
-│   ├── visualization.py
-│   ├── carla_interface.py
-│   └── inference.py
-├── src/
-│   └── alpamayo1_5/
-├── docs/
-│   ├── environment-setup.md
-│   └── inference-workflows.md
-├── requirements-carla.txt
-├── requirements-alpamayo.txt
-└── README.md
-```
