@@ -214,31 +214,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
-# CARLA / Alpamayo local artifacts
-carla_data/
-carla_data_*/
-carla_data*/
-video_results/
-*.mp4
-*.gif
-*.avi
-*.mov
-*.mkv
-debug_logs/
-debug_frames/
-
-# Keep upstream Alpamayo source and old imported files out of this repo
-alpamayo/
-src/
-notebooks/
-docs/
-pyproject.toml
-uv.lock
-CONTRIBUTING.md
-Dockerfile.jetson.jp5
-LICENSE
-
-# Keep README assets tracked
-!assets/
-!assets/*.gif

@@ -44,7 +44,7 @@ def main():
     inference_interval_sec = 1.0
 
     print("=" * 60)
-    print("CARLA Real-time Control with Alpamayo (Modular)")
+    print("CARLA Real-time Control with Alpamayo")
     print("=" * 60)
     print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
     print(f"Mode: {'ASYNC' if args.async_mode else 'SYNC'}")
