@@ -17,8 +17,8 @@ from scipy.spatial.transform import Rotation as R
 from einops import rearrange
 from transformers import BitsAndBytesConfig
 
-from alpamayo_r1.models.alpamayo_r1 import AlpamayoR1
-from alpamayo_r1 import helper
+from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
+from alpamayo1_5 import helper
 
 
 def parse_args():
@@ -194,14 +194,14 @@ def main():
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4"
         )
-        model = AlpamayoR1.from_pretrained(
+        model = Alpamayo1_5.from_pretrained(
             "nvidia/Alpamayo-R1-10B",
             quantization_config=quantization_config,
             device_map="auto",
             torch_dtype=torch.bfloat16
         )
     else:
-        model = AlpamayoR1.from_pretrained(
+        model = Alpamayo1_5.from_pretrained(
             "nvidia/Alpamayo-R1-10B",
             dtype=torch.bfloat16
         ).to("cuda")
