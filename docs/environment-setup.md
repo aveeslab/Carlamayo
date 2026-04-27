@@ -56,8 +56,8 @@ export PATH="$HOME/.local/bin:$PATH"
 From the repository root:
 
 ```bash
-uv venv ar1_venv
-source ar1_venv/bin/activate
+uv venv a1_5_venv
+source a1_5_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install -r requirements-alpamayo.txt
@@ -91,8 +91,8 @@ Closed-loop execution needs Alpamayo and CARLA Python packages in the same envir
 From the repository root:
 
 ```bash
-uv venv ar1_carla_venv
-source ar1_carla_venv/bin/activate
+uv venv a1_5_carla_venv
+source a1_5_carla_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install carla==0.9.16
@@ -112,8 +112,8 @@ Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
 - `uv sync --active` alone does not install every package imported by the CARLA
   inference scripts. Keep the `requirements-alpamayo.txt` install step for
   OpenCV, SciPy, and optional 4-bit quantization support.
-- The released Hugging Face model config for `nvidia/Alpamayo-R1-10B` can still
-  contain legacy Hydra targets under `alpamayo_r1.*`. This repository normalizes
-  those targets to the vendored `alpamayo1_5.*` modules at config-load time.
+- The released Hugging Face model config for `nvidia/Alpamayo-1.5-10B` can still
+  contain legacy Hydra targets under `alpamayo_1_5.*`. This repository normalizes
+  those targets to the vendored `alpamayo_1_5.*` modules at config-load time.
 - A simulator build may print a CARLA API version mismatch warning with
   `carla==0.9.16`; the validated smoke tests still ran.
