@@ -207,8 +207,9 @@ def main():
         ego_vehicle = None
         for _ in range(10):
             start_pose = random.choice(spawn_points)
-            ego_vehicle = world.spawn_actor(vehicle_bp, start_pose)
-            if ego_vehicle is not None: break
+            ego_vehicle = world.try_spawn_actor(vehicle_bp, start_pose)
+            if ego_vehicle is not None:
+                break
 
         if ego_vehicle is None:
             print("Error: Could not spawn ego vehicle.")

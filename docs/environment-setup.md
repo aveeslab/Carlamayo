@@ -56,8 +56,8 @@ export PATH="$HOME/.local/bin:$PATH"
 From the repository root:
 
 ```bash
-uv venv a1_5_venv
-source a1_5_venv/bin/activate
+uv venv ar1_venv --python 3.12
+source ar1_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install -r requirements-alpamayo.txt
@@ -91,8 +91,8 @@ Closed-loop execution needs Alpamayo and CARLA Python packages in the same envir
 From the repository root:
 
 ```bash
-uv venv a1_5_carla_venv
-source a1_5_carla_venv/bin/activate
+uv venv ar1_carla_venv --python 3.12
+source ar1_carla_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install carla==0.9.16
