@@ -57,6 +57,36 @@ def sensor_callback(sensor_data, sensor_queue, sensor_name):
     if not sensor_queue.full():
         sensor_queue.put((sensor_data.frame, sensor_name, sensor_data))
 
+
+def collect_synchronous_sensor_frame(sensor_queue, expected_sensor_names, frame_id, timeout=5.0):
+    """Collect one complete synchronous sensor packet for a world tick frame.
+
+    CARLA sensors can leave older/newer frame messages in the shared queue,
+    especially after map reloads or when image encoding is slower than the
+    simulation tick.  Filter by the exact frame returned from ``world.tick()``
+    so trajectory poses and sensor files stay aligned.
+    """
+    deadline = time.time() + timeout
+    frame_data = {}
+    expected = set(expected_sensor_names)
+
+    while time.time() < deadline and set(frame_data) != expected:
+        remaining = max(0.1, deadline - time.time())
+        try:
+            sensor_frame, name, data = sensor_queue.get(True, remaining)
+        except queue.Empty:
+            break
+
+        if sensor_frame < frame_id:
+            continue
+        if sensor_frame > frame_id:
+            # This frame's packet is already incomplete; do not mix frames.
+            continue
+        if name in expected:
+            frame_data[name] = data
+
+    return frame_data
+
 def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
     print(f"Spawning {num_vehicles} vehicles and {num_walkers} walkers...")
     actor_list = []
@@ -135,8 +165,12 @@ def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
 # ==============================================================================
 def main():
     actor_list = []
+    sensor_list = []
     trajectory_data = {}
     expected_sensor_names = list(SENSOR_CONFIGS.keys()) + ["lidar_top"]
+    client = None
+    world = None
+    tm = None
 
     try:
         # 클라이언트 연결
@@ -201,6 +235,7 @@ def main():
             sensor = world.spawn_actor(cam_bp, transform, attach_to=ego_vehicle)
             sensor.listen(lambda data, n=name: sensor_callback(data, sensor_queue, n))
             actor_list.append(sensor)
+            sensor_list.append(sensor)
 
         # LiDAR
         lidar_bp = bp_lib.find('sensor.lidar.ray_cast')
@@ -213,6 +248,7 @@ def main():
         lidar_sensor = world.spawn_actor(lidar_bp, lidar_transform, attach_to=ego_vehicle)
         lidar_sensor.listen(lambda data: sensor_callback(data, sensor_queue, "lidar_top"))
         actor_list.append(lidar_sensor)
+        sensor_list.append(lidar_sensor)
 
         total_sensors = len(SENSOR_CONFIGS) + 1
 
@@ -231,23 +267,20 @@ def main():
 
         # Main Loop
         while True:
-            world.tick()
+            frame_id = world.tick()
             tf = ego_vehicle.get_transform()
 
-            current_frame_data = {}
-            try:
-                for _ in range(total_sensors):
-                    frame, name, data = sensor_queue.get(True, 5.0)
-                    current_frame_data[name] = data
-            except queue.Empty:
-                print("Warning: Sensor data missing (Timeout). Skipping frame.")
-                continue
+            current_frame_data = collect_synchronous_sensor_frame(
+                sensor_queue,
+                expected_sensor_names,
+                frame_id,
+                timeout=5.0,
+            )
 
             if len(current_frame_data) != total_sensors:
-                print("Warning: Incomplete frame data. Skipping.")
+                missing = sorted(set(expected_sensor_names) - set(current_frame_data))
+                print(f"Warning: Incomplete frame {frame_id} data. Missing: {missing}. Skipping.")
                 continue
-
-            frame_id = list(current_frame_data.values())[0].frame
 
             print(f"Recording Frame: {frame_id}")
 
@@ -299,14 +332,21 @@ def main():
             with open(json_path, 'w') as f:
                 json.dump(filtered_trajectory_data, f, indent=4)
 
-        settings = world.get_settings()
-        settings.synchronous_mode = False
-        settings.fixed_delta_seconds = None
-        world.apply_settings(settings)
-        tm.set_synchronous_mode(False)
+        for sensor in sensor_list:
+            if sensor is not None and sensor.is_alive:
+                sensor.stop()
+
+        if world is not None:
+            settings = world.get_settings()
+            settings.synchronous_mode = False
+            settings.fixed_delta_seconds = None
+            world.apply_settings(settings)
+        if tm is not None:
+            tm.set_synchronous_mode(False)
 
         print("Destroying actors...")
-        client.apply_batch([carla.command.DestroyActor(x) for x in actor_list])
+        if client is not None and actor_list:
+            client.apply_batch_sync([carla.command.DestroyActor(x) for x in actor_list], True)
         print("Done.")
 
 if __name__ == '__main__':

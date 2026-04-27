@@ -7,8 +7,8 @@ This guide covers CARLA data collection, open-loop inference, and closed-loop in
 Start CARLA first:
 
 ```bash
-cd ~/carla
-./CarlaUE4.sh
+cd ~/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 Then run data collection from the repository root:
@@ -23,6 +23,10 @@ Outputs:
 - `carla_data/trajectory.json`
 - `carla_data/cam_*/<frame>.jpg`
 - `carla_data/lidar_top/<frame>.ply`
+
+`data_collect.py` records only complete synchronous frames. Sensor messages are
+matched to the exact frame returned by `world.tick()` so camera/LiDAR files and
+trajectory poses remain aligned under slower Epic rendering or after map reloads.
 
 ## 2. Open-Loop Inference
 
@@ -43,19 +47,23 @@ Output:
 
 - `carla_alpamayo_open_loop_result.mp4`
 
+Smoke validation used a 4-frame subset and `--quantization` on an RTX 4080 SUPER
+16 GB. Full-precision mode may require the larger VRAM budget described in the
+README.
+
 ## 3. Closed-Loop Inference
 
 Before running, make sure CARLA is running:
 
 ```bash
-cd ~/carla
-./CarlaUE4.sh
+cd ~/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 Set the CARLA PythonAPI path if needed:
 
 ```bash
-export CARLA_ROOT=/path/to/CARLA_0.9.16
+export CARLA_ROOT=$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
 ```
 
 or edit `module/config.py`:
@@ -86,6 +94,14 @@ python carla_alpamayo_closed_loop.py --async
 Output:
 
 - `carla_alpamayo_closed_loop_result.mp4`
+
+For lower VRAM machines, the validated command was:
+
+```bash
+source ar1_carla_venv/bin/activate
+export CARLA_ROOT=$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+python carla_alpamayo_closed_loop.py --quantization --async
+```
 
 ## 4. NVIDIA Original Test Script
 

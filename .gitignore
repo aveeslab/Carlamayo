@@ -156,6 +156,14 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+venv-carla/
+ar1_venv/
+ar1_carla_venv/
+
+# CARLA/Alpamayo generated validation artifacts
+carla_data/
+carla_data_smoke/
+carla_alpamayo_*_result.mp4
 
 # Spyder project settings
 .spyderproject

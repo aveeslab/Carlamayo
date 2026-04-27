@@ -15,9 +15,32 @@
 
 """Configuration classes for Alpamayo 1.5 release models."""
 
+import copy
 from typing import Any
 
 from alpamayo1_5.models.base_model import ReasoningVLAConfig
+
+
+def _rewrite_legacy_hydra_targets(value: Any) -> Any:
+    """Rewrite upstream config targets that still use the old package name.
+
+    The released Hugging Face config for ``nvidia/Alpamayo-R1-10B`` contains
+    Hydra ``_target_`` values under ``alpamayo_r1.*`` while this repository
+    vendors the same modules under ``alpamayo1_5.*``.  Normalizing the config
+    at load time keeps the downloaded model config unchanged and lets Hydra
+    instantiate the local classes.
+    """
+    if isinstance(value, dict):
+        rewritten = {}
+        for key, item in value.items():
+            if key == "_target_" and isinstance(item, str):
+                rewritten[key] = item.replace("alpamayo_r1.", "alpamayo1_5.")
+            else:
+                rewritten[key] = _rewrite_legacy_hydra_targets(item)
+        return rewritten
+    if isinstance(value, list):
+        return [_rewrite_legacy_hydra_targets(item) for item in value]
+    return value
 
 
 class Alpamayo1_5Config(ReasoningVLAConfig):
@@ -38,6 +61,12 @@ class Alpamayo1_5Config(ReasoningVLAConfig):
         include_frame_nums: bool = False,
         **kwargs: Any,
     ) -> None:
+        diffusion_cfg = _rewrite_legacy_hydra_targets(copy.deepcopy(diffusion_cfg))
+        action_space_cfg = _rewrite_legacy_hydra_targets(copy.deepcopy(action_space_cfg))
+        action_in_proj_cfg = _rewrite_legacy_hydra_targets(copy.deepcopy(action_in_proj_cfg))
+        action_out_proj_cfg = _rewrite_legacy_hydra_targets(copy.deepcopy(action_out_proj_cfg))
+        expert_cfg = _rewrite_legacy_hydra_targets(copy.deepcopy(expert_cfg))
+        kwargs = _rewrite_legacy_hydra_targets(kwargs)
         super().__init__(**kwargs)
         self.diffusion_cfg = diffusion_cfg
         self.action_space_cfg = action_space_cfg

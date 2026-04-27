@@ -48,6 +48,32 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 
 - [Data Collection and Inference Workflows](docs/inference-workflows.md)
 
+## Local Validation Summary
+
+This checkout was validated with a packaged CARLA build at:
+
+```bash
+$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor/CarlaUE4.sh
+```
+
+CARLA was launched with only these runtime options during validation:
+
+```bash
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
+```
+
+Validated workflows:
+
+- `data_collect.py` collected synchronized camera/LiDAR frames and wrote `carla_data/trajectory.json`.
+- `carla_alpamayo_open_loop.py --quantization` loaded `nvidia/Alpamayo-R1-10B` and produced an MP4 on a 4-frame smoke dataset.
+- `carla_alpamayo_closed_loop.py --quantization --async` loaded Town03, spawned ego/NPC actors, ran repeated Alpamayo inferences, applied vehicle controls, and produced an MP4 after interruption.
+
+Notes from validation:
+
+- The local simulator reports API version `294096eb1-dirty`; the installed Python wheel is `carla==0.9.16`. The client prints a version mismatch warning, but the tested workflows connected and ran.
+- 4-bit quantized inference used about 7.1 GB VRAM on an RTX 4080 SUPER 16 GB. Full-precision inference was not attempted because the README recommends at least 24 GB VRAM.
+- OpenCV may first try unavailable hardware H.264 encoders while saving MP4 files, then fall back to `mp4v`; the videos were still written successfully.
+
 ## Project Structure
 
 ```
