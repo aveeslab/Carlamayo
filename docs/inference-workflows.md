@@ -33,7 +33,7 @@ trajectory poses remain aligned under slower Epic rendering or after map reloads
 Run open-loop inference on collected CARLA data:
 
 ```bash
-source ar1_venv/bin/activate
+source a1_5_venv/bin/activate
 python carla_alpamayo_open_loop.py
 ```
 
@@ -75,7 +75,7 @@ CARLA_AGENT_ROOT = "~/carla"
 Run closed-loop inference from the repository root:
 
 ```bash
-source ar1_carla_venv/bin/activate
+source a1_5_carla_venv/bin/activate
 python carla_alpamayo_closed_loop.py
 ```
 
@@ -98,7 +98,7 @@ Output:
 For lower VRAM machines, the validated command was:
 
 ```bash
-source ar1_carla_venv/bin/activate
+source a1_5_carla_venv/bin/activate
 export CARLA_ROOT=~/carla
 python carla_alpamayo_closed_loop.py --quantization --async
 ```
@@ -108,7 +108,7 @@ python carla_alpamayo_closed_loop.py --quantization --async
 This script downloads example data and model weights. The model weights are large and may take time depending on network speed.
 
 ```bash
-source ar1_venv/bin/activate
+source a1_5_venv/bin/activate
 python src/alpamayo1_5/test_inference.py
 ```
 
