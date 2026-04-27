@@ -82,7 +82,7 @@ config.attn_implementation = "sdpa"
 
 If you encounter OOM errors:
 1. Try Quantization option
-2. Ensure you have a GPU with at least 12 GB VRAM
+2. Ensure you have a GPU with at least 16 GB VRAM
 3. Reduce `num_traj_samples` if generating multiple trajectories
 4. Close other GPU-intensive applications
 
