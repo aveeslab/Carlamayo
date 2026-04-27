@@ -106,14 +106,3 @@ export CARLA_ROOT=~/carla
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
-
-## 4. Validation Notes
-
-- `uv sync --active` alone does not install every package imported by the CARLA
-  inference scripts. Keep the `requirements-alpamayo.txt` install step for
-  OpenCV, SciPy, and optional 4-bit quantization support.
-- The released Hugging Face model config for `nvidia/Alpamayo-1.5-10B` can still
-  contain legacy Hydra targets under `alpamayo_1_5.*`. This repository normalizes
-  those targets to the vendored `alpamayo_1_5.*` modules at config-load time.
-- A simulator build may print a CARLA API version mismatch warning with
-  `carla==0.9.16`; the validated smoke tests still ran.
