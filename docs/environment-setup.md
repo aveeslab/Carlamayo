@@ -13,6 +13,23 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 
 > GPUs with less than 24 GB VRAM may encounter CUDA out-of-memory errors. The 4-bit quantization option can run with lower VRAM, depending on the full workload.
 
+## 0. Clone the Repository and Submodules
+
+Clone with the NVIDIA Alpamayo 1.5 submodule:
+
+```bash
+git clone --recurse-submodules https://github.com/aveeslab/Alpamayo-CARLA.git
+cd Alpamayo-CARLA
+```
+
+If you already cloned the repository without submodules, initialize them from the repository root:
+
+```bash
+git submodule update --init --recursive
+```
+
+The Alpamayo source remains in `third_party/alpamayo1.5` as a submodule. This repository does not vendor a copied `src/alpamayo1_5` tree.
+
 ## 1. CARLA Environment Setup
 
 Use this environment for CARLA and data collection.
@@ -26,8 +43,7 @@ tar -xvzf carla-0-9-16-linux
 ./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
-If your CARLA archive extracts into a nested package directory, move or symlink the
-CARLA root so that `~/carla` contains `CarlaUE4.sh` and `PythonAPI/`.
+If your CARLA archive extracts into a nested package directory, move or symlink the CARLA root so that `~/carla` contains `CarlaUE4.sh` and `PythonAPI/`.
 
 ### 1.2 Create a CARLA Python environment
 
@@ -60,19 +76,17 @@ uv venv a1_5_venv --python 3.12
 source a1_5_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
+python -m pip install --no-deps -e third_party/alpamayo1.5
 python -m pip install -r requirements-alpamayo.txt
 ```
 
-`uv sync --active` installs the package and the core `pyproject.toml`
-dependencies. The extra `requirements-alpamayo.txt` step is still required for
-the CARLA inference scripts because they import OpenCV, SciPy, and optional
-4-bit quantization support (`bitsandbytes`).
+`uv sync --active` installs the core `pyproject.toml` dependencies for this integration project. The editable install step exposes the `alpamayo1_5` Python package from the submodule. The extra `requirements-alpamayo.txt` step is still required for the CARLA inference scripts because they import OpenCV, SciPy, and optional 4-bit quantization support (`bitsandbytes`).
 
 ### 2.3 Authenticate with Hugging Face
 
 The model requires access to gated resources. Request access first:
 
-- [Physical AI AV Dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
+- [PhysicalAI-Autonomous-Vehicles Dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
 - [Alpamayo Model Weights](https://huggingface.co/nvidia/Alpamayo-1.5-10B)
 
 Then authenticate:
@@ -95,6 +109,7 @@ uv venv a1_5_carla_venv --python 3.12
 source a1_5_carla_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
+python -m pip install --no-deps -e third_party/alpamayo1.5
 python -m pip install carla==0.9.16
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
@@ -106,3 +121,9 @@ export CARLA_ROOT=~/carla
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
+
+## 4. License Boundaries
+
+- This repository's CARLA integration code is MIT licensed. See `LICENSE`.
+- NVIDIA Alpamayo 1.5 source code is a submodule licensed under Apache License 2.0. See `third_party/alpamayo1.5/LICENSE`.
+- NVIDIA Alpamayo 1.5 model weights are not redistributed here and are governed by the Hugging Face model card/license terms, including non-commercial restrictions where applicable.

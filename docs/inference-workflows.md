@@ -24,9 +24,7 @@ Outputs:
 - `carla_data/cam_*/<frame>.jpg`
 - `carla_data/lidar_top/<frame>.ply`
 
-`data_collect.py` records only complete synchronous frames. Sensor messages are
-matched to the exact frame returned by `world.tick()` so camera/LiDAR files and
-trajectory poses remain aligned under slower Epic rendering or after map reloads.
+`data_collect.py` records only complete synchronous frames. Sensor messages are matched to the exact frame returned by `world.tick()` so camera/LiDAR files and trajectory poses remain aligned under slower Epic rendering or after map reloads.
 
 ## 2. Open-Loop Inference
 
@@ -47,9 +45,7 @@ Output:
 
 - `carla_alpamayo_open_loop_result.mp4`
 
-Smoke validation used a 4-frame subset and `--quantization` on an RTX 4080 SUPER
-16 GB. Full-precision mode may require the larger VRAM budget described in the
-README.
+Smoke validation used a 4-frame subset and `--quantization` on an RTX 4080 SUPER 16 GB. Full-precision mode may require the larger VRAM budget described in the README.
 
 ## 3. Closed-Loop Inference
 
@@ -105,11 +101,11 @@ python carla_alpamayo_closed_loop.py --quantization --async
 
 ## 4. NVIDIA Original Test Script
 
-This script downloads example data and model weights. The model weights are large and may take time depending on network speed.
+The original Alpamayo test script is provided by the submodule. It downloads example data and model weights. The model weights are large and may take time depending on network speed.
 
 ```bash
 source a1_5_venv/bin/activate
-python src/alpamayo1_5/test_inference.py
+python third_party/alpamayo1.5/src/alpamayo1_5/test_inference.py
 ```
 
-To generate more trajectories and reasoning traces, increase `num_traj_samples` in the script.
+To generate more trajectories and reasoning traces, increase `num_traj_samples` in that submodule script. Review the model card/license terms before downloading or using the model weights.

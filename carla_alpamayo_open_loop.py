@@ -1,7 +1,7 @@
-# SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright (c) 2026 AVEES Lab
+# SPDX-License-Identifier: MIT
 #
-# Inference script for CARLA collected data on Alpamayo-R1
+# Open-loop inference script for CARLA-collected data with Alpamayo 1.5.
 
 import os
 import json

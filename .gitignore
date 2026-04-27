@@ -159,10 +159,6 @@ venv.bak/
 venv-carla/
 a1_5_venv/
 a1_5_carla_venv/
-# Legacy local names used during early validation.
-ar1_venv/
-ar1_carla_venv/
-
 # CARLA/Alpamayo generated validation artifacts
 carla_data*/
 carla_alpamayo_*.mp4

@@ -1,5 +1,5 @@
 [project]
-name = "alpamayo1_5"
+name = "carlamayo"
 version = "0.1.0"
 requires-python = "==3.12.*"
 dependencies = [
@@ -19,10 +19,6 @@ dependencies = [
   "seaborn>=0.13.2",
 ]
 
-[build-system]
-requires = ["uv_build>=0.9.7,<0.10.0"]
-build-backend = "uv_build"
-
 [dependency-groups]
 dev = [
   "mediapy>=1.2.4",
@@ -33,6 +29,7 @@ dev = [
 ]
 
 [tool.uv]
+package = false
 no-build-isolation-package = ["flash-attn"]
 
 [tool.ruff]
