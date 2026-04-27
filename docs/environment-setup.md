@@ -10,6 +10,7 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 | **GPU** | NVIDIA GPU with ≥24 GB VRAM recommended for Alpamayo; 4-bit quantization can reduce memory usage |
 | **OS** | Linux tested |
 | **CARLA** | 0.9.16 |
+| **ffmpeg** | Recommended for VS Code/browser-compatible H.264 MP4 video output |
 
 > GPUs with less than 24 GB VRAM may encounter CUDA out-of-memory errors. The 4-bit quantization option can run with lower VRAM, depending on the full workload.
 
@@ -54,6 +55,16 @@ python3.10 -m venv venv-carla
 source venv-carla/bin/activate
 pip install -r requirements-carla.txt
 pip install carla==0.9.16
+```
+
+
+### 1.3 Install ffmpeg for compatible MP4 output
+
+The inference scripts can write an OpenCV fallback video directly, but VS Code and browser-based players usually require H.264/yuv420p MP4. Install `ffmpeg` so videos are automatically transcoded to that compatible format:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y ffmpeg
 ```
 
 ## 2. Alpamayo Environment Setup

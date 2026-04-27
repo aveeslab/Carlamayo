@@ -1,5 +1,8 @@
 """Visualization and video recording helpers."""
 
+import os
+import shutil
+import subprocess
 import textwrap
 
 import cv2
@@ -123,6 +126,36 @@ def create_visualization_frame(cam_img, pred_xyz, selected_idx, frame_count, inf
     return cv2.cvtColor(vis_img, cv2.COLOR_BGR2RGB)
 
 
+def transcode_video_for_browser_compat(source_path, output_path):
+    """Transcode OpenCV output to H.264/yuv420p for VS Code/browser players."""
+    if shutil.which("ffmpeg") is None:
+        return False, "ffmpeg not found"
+
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        source_path,
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        "-preset",
+        "fast",
+        "-crf",
+        "18",
+        output_path,
+    ]
+    result = subprocess.run(cmd, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        return False, result.stderr.strip() or "ffmpeg failed"
+    return True, "H.264/yuv420p"
+
+
 class VideoRecorder:
     """Records frames and saves to video file."""
 
@@ -134,10 +167,10 @@ class VideoRecorder:
     def add_frame(self, frame):
         self.frames.append(frame)
 
-    def _create_writer(self, width, height):
+    def _create_writer(self, width, height, output_path):
         for codec in ("mp4v", "avc1", "H264"):
             fourcc = cv2.VideoWriter_fourcc(*codec)
-            writer = cv2.VideoWriter(self.output_path, fourcc, self.fps, (width, height))
+            writer = cv2.VideoWriter(output_path, fourcc, self.fps, (width, height))
             if writer.isOpened():
                 return writer, codec
             writer.release()
@@ -150,7 +183,11 @@ class VideoRecorder:
 
         print(f"\nSaving video with {len(self.frames)} frames...")
         h, w = self.frames[0].shape[:2]
-        writer, selected_codec = self._create_writer(w, h)
+        output_dir = os.path.dirname(os.path.abspath(self.output_path)) or "."
+        os.makedirs(output_dir, exist_ok=True)
+        temp_path = os.path.join(output_dir, f".{os.path.basename(self.output_path)}.opencv-tmp.mp4")
+
+        writer, selected_codec = self._create_writer(w, h, temp_path)
         if writer is None:
             print("Failed to initialize video writer.")
             return
@@ -161,5 +198,19 @@ class VideoRecorder:
             writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
         writer.release()
+
+        transcoded, transcode_msg = transcode_video_for_browser_compat(temp_path, self.output_path)
+        if not transcoded:
+            shutil.move(temp_path, self.output_path)
+            print(
+                f"Warning: H.264 transcode skipped ({transcode_msg}); "
+                f"saved OpenCV {selected_codec} output."
+            )
+        else:
+            os.remove(temp_path)
+
         print(f"Video saved: {self.output_path}")
-        print(f"  Codec: {selected_codec}, Resolution: {w}x{h}, FPS: {self.fps}, Frames: {len(self.frames)}")
+        print(
+            f"  Codec: {transcode_msg if transcoded else selected_codec}, "
+            f"Resolution: {w}x{h}, FPS: {self.fps}, Frames: {len(self.frames)}"
+        )

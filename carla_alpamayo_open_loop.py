@@ -4,6 +4,7 @@
 # Open-loop inference script for CARLA-collected data with Alpamayo 1.5.
 
 import os
+import shutil
 import json
 import copy
 import time
@@ -21,6 +22,7 @@ from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 from alpamayo1_5 import helper
 
 from module.alpamayo_compat import patch_legacy_hydra_targets
+from module.visualization import transcode_video_for_browser_compat
 
 patch_legacy_hydra_targets()
 
@@ -360,11 +362,13 @@ def create_video_full(all_predictions, camera_images, all_cots, all_inference_ti
         if frame_idx % 10 == 0:
             print(f"  Rendering frame {frame_idx+1}/{total_frames}...")
 
-    # Save MP4 only (GIF disabled)
+    # Save an OpenCV MP4 first, then transcode to H.264/yuv420p when ffmpeg is available.
     video_fps = 5
     h, w = video_frames[0].shape[:2]
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter(output_path, fourcc, video_fps, (w, h))
+    output_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    temp_path = os.path.join(output_dir, f".{os.path.basename(output_path)}.opencv-tmp.mp4")
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    video = cv2.VideoWriter(temp_path, fourcc, video_fps, (w, h))
 
     for frame in video_frames:
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -372,7 +376,21 @@ def create_video_full(all_predictions, camera_images, all_cots, all_inference_ti
 
     video.release()
 
+    transcoded, transcode_msg = transcode_video_for_browser_compat(temp_path, output_path)
+    if not transcoded:
+        shutil.move(temp_path, output_path)
+        print(
+            f"Warning: H.264 transcode skipped ({transcode_msg}); "
+            "saved OpenCV mp4v output."
+        )
+    else:
+        os.remove(temp_path)
+
     print(f"Video saved: {output_path}")
+    print(
+        f"  Codec: {transcode_msg if transcoded else 'mp4v'}, "
+        f"Resolution: {w}x{h}, FPS: {video_fps}, Frames: {len(video_frames)}"
+    )
     print(f"  Total frames: {total_frames}")
 
     # GIF 생성 (주석처리)
