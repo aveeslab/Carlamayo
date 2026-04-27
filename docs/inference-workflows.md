@@ -7,7 +7,7 @@ This guide covers CARLA data collection, open-loop inference, and closed-loop in
 Start CARLA first:
 
 ```bash
-cd ~/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+cd ~/carla
 ./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
@@ -56,20 +56,20 @@ README.
 Before running, make sure CARLA is running:
 
 ```bash
-cd ~/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+cd ~/carla
 ./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 Set the CARLA PythonAPI path if needed:
 
 ```bash
-export CARLA_ROOT=$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+export CARLA_ROOT=~/carla
 ```
 
 or edit `module/config.py`:
 
 ```python
-CARLA_AGENT_ROOT = "carla/CARLA_0.9.16"
+CARLA_AGENT_ROOT = "~/carla"
 ```
 
 Run closed-loop inference from the repository root:
@@ -99,7 +99,7 @@ For lower VRAM machines, the validated command was:
 
 ```bash
 source ar1_carla_venv/bin/activate
-export CARLA_ROOT=$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+export CARLA_ROOT=~/carla
 python carla_alpamayo_closed_loop.py --quantization --async
 ```
 

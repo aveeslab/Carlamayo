@@ -22,9 +22,9 @@ def _resolve_vehicle_pid_controller():
     for env_key in ("CARLA_ROOT", "CARLA_HOME"):
         v = os.environ.get(env_key)
         if v:
-            candidate_roots.append(v)
+            candidate_roots.append(os.path.expanduser(v))
 
-    candidate_roots.append(cfg.CARLA_AGENT_ROOT)
+    candidate_roots.append(os.path.expanduser(cfg.CARLA_AGENT_ROOT))
 
     for root in candidate_roots:
         agents_parent = os.path.abspath(os.path.join(root, "PythonAPI", "carla"))

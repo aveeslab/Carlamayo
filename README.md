@@ -53,7 +53,7 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 This checkout was validated with a packaged CARLA build at:
 
 ```bash
-$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor/CarlaUE4.sh
+~/carla/CarlaUE4.sh
 ```
 
 CARLA was launched with only these runtime options during validation:

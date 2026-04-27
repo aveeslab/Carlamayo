@@ -1,8 +1,10 @@
 """Configuration for CARLA closed-loop Alpamayo pipeline."""
 
+import os
+
 # User Config (Edit for your local CARLA version/layout)
 # Used only when CARLA_ROOT/CARLA_HOME env vars are not set.
-CARLA_AGENT_ROOT = "carla/CARLA_0.9.16"
+CARLA_AGENT_ROOT = os.path.expanduser("~/carla")
 
 # Alpamayo Configuration
 NUM_CAMERAS = 4

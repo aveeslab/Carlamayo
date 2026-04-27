@@ -26,13 +26,8 @@ tar -xvzf carla-0-9-16-linux
 ./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
-If CARLA is already installed in a packaged `LinuxNoEditor` layout, use the
-launcher inside that directory. The validation machine used:
-
-```bash
-cd $HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
-./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
-```
+If your CARLA archive extracts into a nested package directory, move or symlink the
+CARLA root so that `~/carla` contains `CarlaUE4.sh` and `PythonAPI/`.
 
 ### 1.2 Create a CARLA Python environment
 
@@ -107,14 +102,7 @@ python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 If `agents.navigation.controller` is not found, set `CARLA_ROOT` to the directory that contains `PythonAPI/carla`:
 
 ```bash
-export CARLA_ROOT=/path/to/CARLA_0.9.16
-```
-
-For the local CARLA packaged layout used during validation, the runnable script
-is under `LinuxNoEditor`, so use:
-
-```bash
-export CARLA_ROOT=$HOME/carla/Dist/CARLA_Shipping_294096eb1-dirty/LinuxNoEditor
+export CARLA_ROOT=~/carla
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
@@ -127,5 +115,5 @@ Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
 - The released Hugging Face model config for `nvidia/Alpamayo-R1-10B` can still
   contain legacy Hydra targets under `alpamayo_r1.*`. This repository normalizes
   those targets to the vendored `alpamayo1_5.*` modules at config-load time.
-- A simulator build that reports `294096eb1-dirty` may print a CARLA API version
-  mismatch warning with `carla==0.9.16`; the validated smoke tests still ran.
+- A simulator build may print a CARLA API version mismatch warning with
+  `carla==0.9.16`; the validated smoke tests still ran.
