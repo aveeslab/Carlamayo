@@ -48,19 +48,6 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 
 - [Data Collection and Inference Workflows](docs/inference-workflows.md)
 
-## Local Validation Summary
-
-This checkout was validated with a packaged CARLA build at:
-
-```bash
-~/carla/CarlaUE4.sh
-```
-
-CARLA was launched with only these runtime options during validation:
-
-```bash
-./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
-```
 
 ## Project Structure
 
