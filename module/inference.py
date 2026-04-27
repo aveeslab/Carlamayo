@@ -9,6 +9,9 @@ from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
 from alpamayo1_5 import helper
 
 from . import config as cfg
+from .alpamayo_compat import patch_legacy_hydra_targets
+
+patch_legacy_hydra_targets()
 
 
 def load_model(use_quantization: bool):
