@@ -10,10 +10,12 @@ import numpy as np
 import torch
 
 from module import config as cfg
+from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.carla_interface import CARLAInterface
 from module.inference import (
+    configure_cuda_linalg_library,
     extract_cot_text,
     extract_trajectory_samples,
     load_model,
@@ -23,18 +25,91 @@ from module.inference import (
 )
 
 
+def capture_initial_ui_frame(carla_if, frame_count):
+    """Tick once so paused pygame starts with a real camera frame."""
+
+    carla_if.tick()
+    frame_count += 1
+    state = carla_if.get_ego_state()
+    carla_if.update_history(state)
+    images = carla_if.get_camera_images()
+    ui_frame = None
+    if len(images) > 1:
+        ui_frame = images[1]
+    elif len(images) > 0:
+        ui_frame = images[0]
+
+    telemetry = {
+        "frame": frame_count,
+        "speed_kmh": state["speed"] * 3.6,
+        "steering": 0.0,
+        "inference_time": 0.0,
+    }
+    return frame_count, ui_frame, telemetry
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run CARLA closed-loop control with Alpamayo (modular).")
+    parser = argparse.ArgumentParser(
+        description="Run CARLA closed-loop control with Alpamayo (modular)."
+    )
     parser.add_argument(
         "--quantization",
+        dest="quantization",
         action="store_true",
-        help="Use 4-bit quantized model. Default is full-precision.",
+        default=True,
+        help="Use 4-bit quantized model. This is the default for local closed-loop testing.",
+    )
+    parser.add_argument(
+        "--no-quantization",
+        dest="quantization",
+        action="store_false",
+        help="Use full-precision model instead of the default 4-bit quantized model.",
     )
     parser.add_argument(
         "--async",
         dest="async_mode",
         action="store_true",
         help="Run internal async inference mode (non-blocking world tick).",
+    )
+    parser.add_argument(
+        "--pygame-ui",
+        action="store_true",
+        help="Show a pygame camera UI with navigation text input and pause/resume controls.",
+    )
+    parser.add_argument(
+        "--navigation-text",
+        default="",
+        help='Initial navigation instruction, e.g. "Turn right in 30m".',
+    )
+    parser.add_argument(
+        "--navigation-weight",
+        type=float,
+        default=1.0,
+        help="Navigation CFG weight. 1.0 uses normal nav conditioning; other values use CFG nav.",
+    )
+    parser.add_argument(
+        "--start-paused",
+        action="store_true",
+        help="Start the pygame UI paused so navigation text can be entered before the first tick.",
+    )
+    parser.add_argument(
+        "--carla-map",
+        default=cfg.CARLA_MAP,
+        help=f"CARLA map to load before spawning actors. Default: {cfg.CARLA_MAP}.",
+    )
+    parser.add_argument(
+        "--device-map",
+        default="auto",
+        help='Model device_map passed to from_pretrained. Default: "auto".',
+    )
+    parser.add_argument(
+        "--cuda-linalg-library",
+        choices=("default", "cusolver", "magma"),
+        default="magma",
+        help=(
+            "Preferred CUDA linalg backend for torch.linalg calls. "
+            'Default: "magma" to avoid cuSOLVER cholesky handle failures.'
+        ),
     )
     return parser.parse_args()
 
@@ -48,18 +123,42 @@ def main():
     print("=" * 60)
     print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
     print(f"Mode: {'ASYNC' if args.async_mode else 'SYNC'}")
+    print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
+    print(f"CARLA map: {args.carla_map}")
+    print(f"Device map: {args.device_map}")
+    print(f"CUDA linalg library: {args.cuda_linalg_library}")
+
+    nav_state = NavigationControlState(args.navigation_text, args.navigation_weight)
+    nav_state.paused = bool(args.start_paused)
+    if nav_state.navigation_text:
+        print(
+            f"Initial navigation: {nav_state.navigation_text} "
+            f"(weight={nav_state.navigation_weight:.2f})"
+        )
 
     print("\nLoading model...")
-    model, processor = load_model(args.quantization)
+    configure_cuda_linalg_library(args.cuda_linalg_library)
+    model, processor = load_model(args.quantization, device_map=args.device_map)
     print("Model loaded!")
     print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
     carla_if = CARLAInterface()
     video_recorder = VideoRecorder(cfg.OUTPUT_VIDEO, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
+    pygame_ui = None
+    latest_ui_frame = None
+    latest_telemetry = {}
+
+    if args.pygame_ui:
+        from module.pygame_ui import ClosedLoopPygameUI
+
+        pygame_ui = ClosedLoopPygameUI(
+            width=cfg.PYGAME_WINDOW_WIDTH,
+            height=cfg.PYGAME_WINDOW_HEIGHT,
+        )
 
     try:
         carla_if.connect()
-        carla_if.load_map(cfg.CARLA_MAP)
+        carla_if.load_map(args.carla_map)
         carla_if.spawn_ego_vehicle()
         carla_if.enable_synchronous_mode()
         carla_if.spawn_npcs(num_vehicles=cfg.NPC_VEHICLE_COUNT, num_walkers=cfg.NPC_WALKER_COUNT)
@@ -85,6 +184,41 @@ def main():
         inference_stop = None
         worker_thread = None
 
+        def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
+            def _run_once(weight):
+                return run_inference(
+                    model,
+                    processor,
+                    model_data,
+                    navigation_text=navigation_text,
+                    navigation_weight=weight,
+                )
+
+            try:
+                return _run_once(navigation_weight)
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                if navigation_text and abs(float(navigation_weight) - 1.0) > 1e-6:
+                    message = (
+                        "Navigation CFG ran out of CUDA memory; "
+                        "falling back to normal nav conditioning with weight 1.0."
+                    )
+                    print(message)
+                    nav_state.set_error(message)
+                    return _run_once(1.0)
+                raise
+            except RuntimeError as exc:
+                if "CUSOLVER_STATUS_INTERNAL_ERROR" not in str(exc):
+                    raise
+                message = (
+                    "cuSOLVER linalg backend failed; switching CUDA linalg backend "
+                    "to MAGMA and retrying inference once."
+                )
+                print(message)
+                nav_state.set_error(message)
+                configure_cuda_linalg_library("magma")
+                return _run_once(navigation_weight)
+
         if args.async_mode:
             inference_request_q = queue.Queue(maxsize=1)
             inference_result_q = queue.Queue(maxsize=1)
@@ -92,14 +226,27 @@ def main():
 
             def _build_inference_request():
                 images_array = np.zeros(
-                    (cfg.NUM_CAMERAS, cfg.NUM_FRAMES, cfg.IMG_HEIGHT, cfg.IMG_WIDTH, cfg.IMG_CHANNELS),
+                    (
+                        cfg.NUM_CAMERAS,
+                        cfg.NUM_FRAMES,
+                        cfg.IMG_HEIGHT,
+                        cfg.IMG_WIDTH,
+                        cfg.IMG_CHANNELS,
+                    ),
                     dtype=np.uint8,
                 )
                 for t, frame_images in enumerate(frame_buffer):
                     for c in range(cfg.NUM_CAMERAS):
                         images_array[c, t] = frame_images[c]
                 history_xyz, history_rot = carla_if.get_history_in_local_frame()
-                return {"images_array": images_array, "history_xyz": history_xyz, "history_rot": history_rot}
+                return {
+                    "images_array": images_array,
+                    "history_xyz": history_xyz,
+                    "history_rot": history_rot,
+                    "navigation_text": nav_state.navigation_text,
+                    "navigation_weight": nav_state.navigation_weight,
+                    "navigation_revision": nav_state.revision,
+                }
 
             def _inference_worker():
                 while not inference_stop.is_set():
@@ -112,17 +259,32 @@ def main():
                     req_frame = int(req["frame"])
                     try:
                         t0 = time.time()
-                        model_data = prepare_model_input(req["images_array"], req["history_xyz"], req["history_rot"])
-                        pred_xyz, extra = run_inference(model, processor, model_data)
+                        model_data = prepare_model_input(
+                            req["images_array"],
+                            req["history_xyz"],
+                            req["history_rot"],
+                        )
+                        pred_xyz, extra = _run_inference_with_nav_fallback(
+                            model_data,
+                            navigation_text=req["navigation_text"],
+                            navigation_weight=req["navigation_weight"],
+                        )
                         result = {
                             "frame_submitted": req_frame,
                             "pred_xyz": pred_xyz,
                             "extra": extra,
                             "inference_time": time.time() - t0,
                             "result_ts": time.time(),
+                            "navigation_text": req["navigation_text"],
+                            "navigation_weight": req["navigation_weight"],
+                            "navigation_revision": req["navigation_revision"],
                         }
                     except Exception as e:
-                        result = {"frame_submitted": req_frame, "error": str(e), "result_ts": time.time()}
+                        result = {
+                            "frame_submitted": req_frame,
+                            "error": str(e),
+                            "result_ts": time.time(),
+                        }
 
                     while True:
                         try:
@@ -131,7 +293,11 @@ def main():
                             break
                     inference_result_q.put_nowait(result)
 
-            worker_thread = threading.Thread(target=_inference_worker, name="alpamayo-inference-worker", daemon=True)
+            worker_thread = threading.Thread(
+                target=_inference_worker,
+                name="alpamayo-inference-worker",
+                daemon=True,
+            )
             worker_thread.start()
 
         print("\nStarting control loop...")
@@ -140,8 +306,40 @@ def main():
         print("-" * 60)
 
         frame_count = 0
+        last_seen_nav_revision = nav_state.revision
+        if pygame_ui is not None and nav_state.paused:
+            frame_count, latest_ui_frame, latest_telemetry = capture_initial_ui_frame(
+                carla_if,
+                frame_count,
+            )
+            pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
 
         while True:
+            if pygame_ui is not None:
+                if not pygame_ui.process_events(nav_state):
+                    print("\nPygame UI requested shutdown.")
+                    break
+                if nav_state.revision != last_seen_nav_revision:
+                    print(
+                        f"Navigation updated: {nav_state.navigation_text or '(none)'} "
+                        f"(weight={nav_state.navigation_weight:.2f})"
+                    )
+                    prev_selected_trajectory = None
+                    current_trajectory = None
+                    current_pred_xyz = None
+                    current_trajectory_ts = None
+                    pending_inference = False
+                    last_seen_nav_revision = nav_state.revision
+                if nav_state.paused:
+                    carla_if.apply_control(0.0, 0.0, 1.0)
+                    latest_telemetry = {
+                        **latest_telemetry,
+                        "frame": frame_count,
+                        "inference_time": current_inference_time,
+                    }
+                    pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
+                    continue
+
             carla_if.tick()
             frame_count += 1
 
@@ -149,6 +347,14 @@ def main():
             carla_if.update_history(state)
 
             images = carla_if.get_camera_images()
+            if len(images) > 1:
+                latest_ui_frame = images[1]
+            latest_telemetry = {
+                "frame": frame_count,
+                "speed_kmh": state["speed"] * 3.6,
+                "steering": prev_control["steer"],
+                "inference_time": current_inference_time,
+            }
             frame_buffer.append(images)
             if len(frame_buffer) > cfg.NUM_FRAMES:
                 frame_buffer.pop(0)
@@ -179,7 +385,15 @@ def main():
                         break
                 if latest_result is not None:
                     pending_inference = False
-                    if "error" not in latest_result:
+                    if (
+                        latest_result.get("navigation_revision", nav_state.revision)
+                        != nav_state.revision
+                    ):
+                        print(
+                            f"[Frame {frame_count}] Discarded stale inference result for "
+                            f"navigation revision {latest_result.get('navigation_revision')}"
+                        )
+                    elif "error" not in latest_result:
                         pred_xyz = latest_result["pred_xyz"]
                         extra = latest_result["extra"]
                         inference_time = float(latest_result["inference_time"])
@@ -201,12 +415,27 @@ def main():
                             f"(submitted at frame {latest_result['frame_submitted']})"
                         )
                         print(f"    CoT: {current_cot[:60]}...")
-                        print(f"    Selected traj sample: {current_selected_traj_idx}/{cfg.NUM_TRAJ_SAMPLES - 1}")
+                        print(
+                            f"    Nav: {latest_result.get('navigation_text') or '(none)'} "
+                            f"(weight={latest_result.get('navigation_weight', 1.0):.2f})"
+                        )
+                        print(
+                            f"    Selected traj sample: {current_selected_traj_idx}/"
+                            f"{cfg.NUM_TRAJ_SAMPLES - 1}"
+                        )
                         print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
+                    else:
+                        print(f"[Frame {frame_count}] Inference error: {latest_result['error']}")
             else:
                 if len(frame_buffer) >= cfg.NUM_FRAMES:
                     images_array = np.zeros(
-                        (cfg.NUM_CAMERAS, cfg.NUM_FRAMES, cfg.IMG_HEIGHT, cfg.IMG_WIDTH, cfg.IMG_CHANNELS),
+                        (
+                            cfg.NUM_CAMERAS,
+                            cfg.NUM_FRAMES,
+                            cfg.IMG_HEIGHT,
+                            cfg.IMG_WIDTH,
+                            cfg.IMG_CHANNELS,
+                        ),
                         dtype=np.uint8,
                     )
                     for t, frame_images in enumerate(frame_buffer):
@@ -217,7 +446,11 @@ def main():
 
                     model_data = prepare_model_input(images_array, history_xyz, history_rot)
                     model_start_time = time.time()
-                    pred_xyz, extra = run_inference(model, processor, model_data)
+                    pred_xyz, extra = _run_inference_with_nav_fallback(
+                        model_data,
+                        navigation_text=nav_state.navigation_text,
+                        navigation_weight=nav_state.navigation_weight,
+                    )
                     model_inference_time = time.time() - model_start_time
 
                     traj_samples = extract_trajectory_samples(pred_xyz)
@@ -235,7 +468,14 @@ def main():
 
                     print(f"[Frame {frame_count}] Inference: {model_inference_time:.2f}s")
                     print(f"    CoT: {current_cot[:60]}...")
-                    print(f"    Selected traj sample: {current_selected_traj_idx}/{cfg.NUM_TRAJ_SAMPLES - 1}")
+                    print(
+                        f"    Nav: {nav_state.navigation_text or '(none)'} "
+                        f"(weight={nav_state.navigation_weight:.2f})"
+                    )
+                    print(
+                        f"    Selected traj sample: {current_selected_traj_idx}/"
+                        f"{cfg.NUM_TRAJ_SAMPLES - 1}"
+                    )
                     print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
 
             if current_trajectory is not None:
@@ -259,7 +499,7 @@ def main():
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
                 carla_if.apply_control(steering, throttle, brake)
 
-                if cfg.SAVE_VIDEO and current_pred_xyz is not None:
+                if current_pred_xyz is not None:
                     cam_img = images[1]
                     vis_frame = create_visualization_frame(
                         cam_img,
@@ -270,8 +510,22 @@ def main():
                         current_cot,
                         state["speed"] * 3.6,
                         steering,
+                        navigation_text=nav_state.navigation_text,
+                        navigation_weight=nav_state.navigation_weight,
+                        paused=nav_state.paused,
                     )
-                    video_recorder.add_frame(vis_frame)
+                    latest_ui_frame = vis_frame
+                    if cfg.SAVE_VIDEO:
+                        video_recorder.add_frame(vis_frame)
+
+                latest_telemetry = {
+                    "frame": frame_count,
+                    "speed_kmh": state["speed"] * 3.6,
+                    "steering": steering,
+                    "inference_time": current_inference_time,
+                }
+                if pygame_ui is not None:
+                    pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
 
                 print(
                     f"[Frame {frame_count}] Speed: {state['speed']*3.6:.1f} km/h, "
@@ -281,6 +535,14 @@ def main():
                     print(f"    Trajectory age: {time.time() - current_trajectory_ts:.2f}s")
             else:
                 carla_if.apply_control(0.0, 0.3, 0.0)
+                latest_telemetry = {
+                    "frame": frame_count,
+                    "speed_kmh": state["speed"] * 3.6,
+                    "steering": 0.0,
+                    "inference_time": current_inference_time,
+                }
+                if pygame_ui is not None:
+                    pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
@@ -298,6 +560,8 @@ def main():
                 worker_thread.join(timeout=2.0)
         if cfg.SAVE_VIDEO and video_recorder:
             video_recorder.save()
+        if pygame_ui is not None:
+            pygame_ui.close()
         carla_if.cleanup()
 
     print("\nStopped.")

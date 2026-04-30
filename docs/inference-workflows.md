@@ -75,11 +75,29 @@ source a1_5_carla_venv/bin/activate
 python carla_alpamayo_closed_loop.py
 ```
 
-Optional 4-bit quantized mode:
+Closed-loop now defaults to 4-bit quantized mode for local testing. Use
+`--no-quantization` only when you have enough GPU memory for full precision.
+Model loading also defaults to `--device-map auto` to let Accelerate place
+weights across available devices instead of forcing all weights onto `cuda:0`.
+The closed-loop script also defaults to `--cuda-linalg-library magma`; this
+avoids a cuSOLVER `torch.linalg.cholesky` initialization failure observed in
+the Alpamayo action-space conversion path.
+
+Optional pygame navigation UI:
 
 ```bash
-python carla_alpamayo_closed_loop.py --quantization
+python carla_alpamayo_closed_loop.py --pygame-ui --start-paused
 ```
+
+Controls:
+
+- `Ctrl+P`: pause or resume the synchronous CARLA loop.
+- `Enter`: apply the text in the input box as the next navigation instruction.
+- `Esc`: quit.
+- Input format: `Turn right in 30m | 1.0`. The text before `|` becomes
+  `navigation_text`; the number after `|` becomes the navigation guidance weight.
+  Weight `1.0` uses normal nav conditioning, while other values use Alpamayo's
+  classifier-free guidance navigation path.
 
 Optional async inference mode:
 
@@ -96,7 +114,7 @@ For lower VRAM machines, the validated command was:
 ```bash
 source a1_5_carla_venv/bin/activate
 export CARLA_ROOT=~/carla
-python carla_alpamayo_closed_loop.py --quantization --async
+python carla_alpamayo_closed_loop.py --async
 ```
 
 ## 4. NVIDIA Original Test Script
