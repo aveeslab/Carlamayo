@@ -1,5 +1,7 @@
 """Alpamayo inference utilities."""
 
+import math
+
 import torch
 import numpy as np
 
@@ -13,8 +15,33 @@ from .alpamayo_compat import patch_legacy_hydra_targets
 
 patch_legacy_hydra_targets()
 
+SUPPORTED_CUDA_LINALG_LIBRARIES = {"default", "cusolver", "magma"}
 
-def load_model(use_quantization: bool):
+
+def configure_cuda_linalg_library(library: str | None):
+    """Set PyTorch's preferred CUDA linalg backend when supported."""
+
+    if library is None:
+        return None
+
+    normalized = library.strip().lower()
+    if normalized in {"", "none"}:
+        return None
+    if normalized not in SUPPORTED_CUDA_LINALG_LIBRARIES:
+        supported = ", ".join(sorted(SUPPORTED_CUDA_LINALG_LIBRARIES))
+        raise ValueError(
+            f"Unsupported CUDA linalg library '{library}'. Expected one of: {supported}."
+        )
+    if not torch.cuda.is_available():
+        return None
+
+    preferred_linalg_library = getattr(torch.backends.cuda, "preferred_linalg_library", None)
+    if preferred_linalg_library is None:
+        return None
+    return preferred_linalg_library(normalized)
+
+
+def load_model(use_quantization: bool, device_map="auto"):
     """Load Alpamayo model and processor."""
     if use_quantization:
         quantization_config = BitsAndBytesConfig(
@@ -26,14 +53,21 @@ def load_model(use_quantization: bool):
         model = Alpamayo1_5.from_pretrained(
             "nvidia/Alpamayo-R1-10B",
             quantization_config=quantization_config,
-            device_map={"": 0},
+            device_map=device_map,
             torch_dtype=torch.bfloat16,
         )
     else:
-        model = Alpamayo1_5.from_pretrained(
-            "nvidia/Alpamayo-R1-10B",
-            dtype=torch.bfloat16,
-        ).to("cuda")
+        if device_map:
+            model = Alpamayo1_5.from_pretrained(
+                "nvidia/Alpamayo-R1-10B",
+                dtype=torch.bfloat16,
+                device_map=device_map,
+            )
+        else:
+            model = Alpamayo1_5.from_pretrained(
+                "nvidia/Alpamayo-R1-10B",
+                dtype=torch.bfloat16,
+            ).to("cuda")
 
     processor = helper.get_processor(model.tokenizer)
     return model, processor
@@ -51,9 +85,28 @@ def prepare_model_input(images_array, history_xyz, history_rot):
     }
 
 
-def run_inference(model, processor, data):
-    """Run Alpamayo inference locally."""
-    messages = helper.create_message(data["image_frames"].flatten(0, 1))
+def run_inference(
+    model,
+    processor,
+    data,
+    navigation_text: str | None = None,
+    navigation_weight: float = 1.0,
+):
+    """Run Alpamayo inference locally.
+
+    ``navigation_text`` conditions the trajectory prompt. ``navigation_weight``
+    uses Alpamayo's CFG navigation path when it differs from 1.0.
+    """
+
+    nav_text = navigation_text.strip() if isinstance(navigation_text, str) else ""
+    if not math.isfinite(float(navigation_weight)) or float(navigation_weight) < 0:
+        raise ValueError("navigation_weight must be a non-negative finite number")
+
+    messages = helper.create_message(
+        data["image_frames"].flatten(0, 1),
+        camera_indices=data.get("camera_indices"),
+        nav_text=nav_text or None,
+    )
 
     inputs = processor.apply_chat_template(
         messages,
@@ -71,13 +124,23 @@ def run_inference(model, processor, data):
     }
     model_inputs = helper.to_device(model_inputs, "cuda")
 
+    diffusion_kwargs = {"inference_step": 10}
+    inference_fn = model.sample_trajectories_from_data_with_vlm_rollout
+    if nav_text and not math.isclose(float(navigation_weight), 1.0):
+        inference_fn = model.sample_trajectories_from_data_with_vlm_rollout_cfg_nav
+        diffusion_kwargs = {
+            **diffusion_kwargs,
+            "use_classifier_free_guidance": True,
+            "inference_guidance_weight": float(navigation_weight),
+        }
+
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-        pred_xyz, pred_rot, extra = model.sample_trajectories_from_data_with_vlm_rollout(
+        pred_xyz, pred_rot, extra = inference_fn(
             data=model_inputs,
             top_p=0.98,
             temperature=0.6,
             num_traj_samples=cfg.NUM_TRAJ_SAMPLES,
-            diffusion_kwargs={"inference_step": 10},
+            diffusion_kwargs=diffusion_kwargs,
             max_generation_length=256,
             return_extra=True,
         )

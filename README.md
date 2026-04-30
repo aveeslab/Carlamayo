@@ -43,6 +43,24 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 
 - [Data Collection and Inference](docs/inference-workflows.md)
 
+### Navigation-Controlled Closed Loop
+
+The closed-loop runner supports Alpamayo navigation instructions through a pygame UI. It
+defaults to 4-bit quantization, `Town03`, `device_map=auto`, and the MAGMA CUDA linalg
+backend for local GPU stability.
+
+```bash
+source a1_5_carla_venv/bin/activate
+export CARLA_ROOT=~/carla
+python carla_alpamayo_closed_loop.py --pygame-ui --start-paused
+```
+
+In the UI, type navigation text in the form `Turn right in 30m | 1.0`, then press
+`Enter` to apply it. The text before `|` becomes `navigation_text`; the number after
+`|` is the navigation guidance weight. Use `Ctrl+P` to pause or resume the synchronous
+simulation and `Esc` to quit. Plain spaces and `p` characters are accepted in the text
+input.
+
 ## Project Structure
 
 ```
@@ -59,6 +77,8 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 ├── module/
 │   ├── config.py
 │   ├── pid_controller.py
+│   ├── navigation_control.py
+│   ├── pygame_ui.py
 │   ├── visualization.py
 │   ├── carla_interface.py
 │   └── inference.py

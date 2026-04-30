@@ -12,6 +12,18 @@ import numpy as np
 from . import config as cfg
 
 
+def is_allowed_npc_vehicle_blueprint(blueprint):
+    """Return True for regular passenger-car NPC vehicle blueprints."""
+
+    if not blueprint.has_attribute("number_of_wheels"):
+        return False
+    if int(blueprint.get_attribute("number_of_wheels")) != 4:
+        return False
+
+    blueprint_id = getattr(blueprint, "id", "").lower()
+    return not any(keyword in blueprint_id for keyword in cfg.NPC_EXCLUDED_VEHICLE_KEYWORDS)
+
+
 class CARLAInterface:
     """Interface for CARLA simulation."""
 
@@ -69,8 +81,9 @@ class CARLAInterface:
         traffic_manager.set_global_distance_to_leading_vehicle(2.0)
         traffic_manager.global_percentage_speed_difference(0.0)
 
-        vehicle_bps = [bp for bp in bp_lib.filter("vehicle.*") if bp.has_attribute("number_of_wheels")]
-        vehicle_bps = [bp for bp in vehicle_bps if int(bp.get_attribute("number_of_wheels")) == 4]
+        vehicle_bps = [
+            bp for bp in bp_lib.filter("vehicle.*") if is_allowed_npc_vehicle_blueprint(bp)
+        ]
         spawn_points = self.world.get_map().get_spawn_points()
         random.shuffle(spawn_points)
         vehicle_count = min(num_vehicles, len(spawn_points))

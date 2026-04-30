@@ -21,11 +21,21 @@ NUM_TRAJ_SAMPLES = 1
 SAVE_VIDEO = True
 OUTPUT_VIDEO = "carla_alpamayo_closed_loop_result.mp4"
 VIDEO_FPS = 10
+PYGAME_WINDOW_WIDTH = 1280
+PYGAME_WINDOW_HEIGHT = 900
 
 # CARLA Configuration
 CARLA_MAP = "Town03"  # Urban-style map
 NPC_VEHICLE_COUNT = 50
 NPC_WALKER_COUNT = 50
+NPC_EXCLUDED_VEHICLE_KEYWORDS = (
+    "ambulance",
+    "carlacola",
+    "cybertruck",
+    "firetruck",
+    "fusorosa",
+    "sprinter",
+)
 
 # Control config
 CONTROL_DT = 0.1
