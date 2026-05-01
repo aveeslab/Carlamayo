@@ -74,3 +74,21 @@ def test_pygame_ui_allows_p_inside_non_empty_navigation_text():
         assert state.input_text == "Keep"
     finally:
         ui.close()
+
+
+def test_pygame_ui_vqa_mode_enter_applies_question():
+    import pygame
+
+    ui = ClosedLoopPygameUI(width=320, height=240, mode="vqa")
+    state = NavigationControlState(mode="vqa")
+    try:
+        for key, char in [(pygame.K_w, "w"), (pygame.K_h, "h"), (pygame.K_y, "y")]:
+            pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=key, unicode=char))
+        pygame.event.post(pygame.event.Event(pygame.KEYDOWN, key=pygame.K_RETURN, unicode="\r"))
+
+        assert ui.process_events(state) is True
+        assert state.vqa_question == "why"
+        assert state.revision == 1
+        assert state.input_text == ""
+    finally:
+        ui.close()

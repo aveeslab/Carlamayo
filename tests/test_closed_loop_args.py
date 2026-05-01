@@ -27,6 +27,33 @@ def test_closed_loop_defaults_to_magma_cuda_linalg(monkeypatch):
     assert args.cuda_linalg_library == "magma"
 
 
+def test_closed_loop_defaults_to_normal_mode(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.mode == "normal"
+
+
+def test_closed_loop_accepts_vqa_mode_and_initial_question(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "carla_alpamayo_closed_loop.py",
+            "--mode",
+            "vqa",
+            "--vqa-question",
+            "Describe the scene.",
+        ],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.mode == "vqa"
+    assert args.vqa_question == "Describe the scene."
+
+
 def test_capture_initial_ui_frame_ticks_and_returns_front_wide_camera():
     import numpy as np
 

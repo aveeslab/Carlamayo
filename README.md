@@ -43,23 +43,23 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 
 - [Data Collection and Inference](docs/inference-workflows.md)
 
-### Navigation-Controlled Closed Loop
+### Closed-Loop UI Modes
 
-The closed-loop runner supports Alpamayo navigation instructions through a pygame UI. It
-defaults to 4-bit quantization, `Town03`, `device_map=auto`, and the MAGMA CUDA linalg
-backend for local GPU stability.
+The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
+`--mode`. It defaults to 4-bit quantization, `Town03`, `device_map=auto`, and
+the MAGMA CUDA linalg backend for local GPU stability.
 
 ```bash
 source a1_5_carla_venv/bin/activate
 export CARLA_ROOT=~/carla
-python carla_alpamayo_closed_loop.py --pygame-ui --start-paused
+python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused
 ```
 
-In the UI, type navigation text in the form `Turn right in 30m | 1.0`, then press
-`Enter` to apply it. The text before `|` becomes `navigation_text`; the number after
-`|` is the navigation guidance weight. Use `Ctrl+P` to pause or resume the synchronous
-simulation and `Esc` to quit. Plain spaces and `p` characters are accepted in the text
-input.
+In `navigation` mode, type `Turn right in 30m | 1.0`, then press `Enter`. In
+`vqa` mode, run `python carla_alpamayo_closed_loop.py --mode vqa --pygame-ui
+--start-paused`, type a driving-scene question, and press `Enter` to generate
+an answer using Alpamayo VQA. Use `Ctrl+P` to pause/resume and `Esc` to quit.
+Plain spaces and `p` characters are accepted in the text input.
 
 ## Project Structure
 

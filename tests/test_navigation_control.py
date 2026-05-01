@@ -44,3 +44,20 @@ def test_navigation_control_state_tracks_pause_and_revision():
 
     state.toggle_pause()
     assert state.paused is False
+
+
+def test_vqa_control_state_submits_question_and_tracks_answer():
+    state = NavigationControlState(mode="vqa", vqa_question="Describe the scene.")
+
+    assert state.mode == "vqa"
+    assert state.vqa_question == "Describe the scene."
+    assert state.revision == 0
+
+    applied = state.submit_command("What traffic lights are visible?")
+
+    assert state.vqa_question == "What traffic lights are visible?"
+    assert state.revision == 1
+    assert applied.text == "What traffic lights are visible?"
+
+    state.set_vqa_answer("A green light is visible.")
+    assert state.vqa_answer == "A green light is visible."

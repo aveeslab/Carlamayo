@@ -15,17 +15,24 @@ from .navigation_control import NavigationControlState
 class ClosedLoopPygameUI:
     """Show the vehicle camera stream and collect live navigation prompts."""
 
-    def __init__(self, width: int = 1280, height: int = 900, title: str = "CarlaMayo Navigation"):
+    def __init__(
+        self,
+        width: int = 1280,
+        height: int = 900,
+        title: str = "CarlaMayo",
+        mode: str = "navigation",
+    ):
         import pygame
 
         self.pygame = pygame
         pygame.init()
         pygame.font.init()
+        self.mode = mode
         self.width = width
         self.height = height
         self.panel_height = 190
         self.screen = pygame.display.set_mode((width, height))
-        pygame.display.set_caption(title)
+        pygame.display.set_caption(f"{title} ({mode})")
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("DejaVu Sans", 22)
         self.small_font = pygame.font.SysFont("DejaVu Sans", 18)
@@ -127,20 +134,45 @@ class ClosedLoopPygameUI:
             f"steer {steer:.2f} | inference {inference_time:.2f}s"
         )
         self._draw_text(status_text, 18, y0 + 14, self.font, status_color)
-        nav_text = nav_state.navigation_text or "(no navigation text)"
-        self._draw_wrapped(
-            f"Active nav: {nav_text} | weight: {nav_state.navigation_weight:.2f}",
-            18,
-            y0 + 48,
-            width=105,
-            color=(230, 230, 230),
-        )
-        self._draw_text(
-            "Input: text | weight   Enter=apply, Ctrl+P=pause/resume, Esc=quit",
-            18,
-            y0 + 88,
-            self.small_font,
-        )
+        if nav_state.mode == "navigation":
+            nav_text = nav_state.navigation_text or "(no navigation text)"
+            self._draw_wrapped(
+                f"Active nav: {nav_text} | weight: {nav_state.navigation_weight:.2f}",
+                18,
+                y0 + 48,
+                width=105,
+                color=(230, 230, 230),
+            )
+            help_text = "Input: text | weight   Enter=apply, Ctrl+P=pause/resume, Esc=quit"
+        elif nav_state.mode == "vqa":
+            question = nav_state.vqa_question or "(no VQA question)"
+            answer = nav_state.vqa_answer or "(answer pending after Enter/resume)"
+            self._draw_wrapped(
+                f"VQA question: {question}",
+                18,
+                y0 + 48,
+                width=105,
+                color=(230, 230, 230),
+            )
+            self._draw_wrapped(
+                f"Answer: {answer}",
+                18,
+                y0 + 70,
+                width=105,
+                color=(190, 220, 255),
+            )
+            help_text = "Input: VQA question   Enter=ask, Ctrl+P=pause/resume, Esc=quit"
+        else:
+            self._draw_wrapped(
+                "Normal closed-loop mode: no text prompt is applied.",
+                18,
+                y0 + 48,
+                width=105,
+                color=(230, 230, 230),
+            )
+            help_text = "Ctrl+P=pause/resume, Esc=quit"
+
+        self._draw_text(help_text, 18, y0 + 88, self.small_font)
         input_rect = (18, y0 + 116, self.width - 36, 36)
         pygame.draw.rect(self.screen, (35, 35, 35), input_rect, border_radius=6)
         pygame.draw.rect(self.screen, (120, 120, 120), input_rect, width=1, border_radius=6)

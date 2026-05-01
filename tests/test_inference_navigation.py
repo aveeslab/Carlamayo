@@ -16,6 +16,7 @@ class FakeModel:
     def __init__(self):
         self.normal_kwargs = None
         self.cfg_kwargs = None
+        self.vqa_kwargs = None
 
     def sample_trajectories_from_data_with_vlm_rollout(self, **kwargs):
         self.normal_kwargs = kwargs
@@ -24,6 +25,10 @@ class FakeModel:
     def sample_trajectories_from_data_with_vlm_rollout_cfg_nav(self, **kwargs):
         self.cfg_kwargs = kwargs
         return "pred-cfg", "rot-cfg", {"cot": ["cfg"]}
+
+    def generate_text(self, **kwargs):
+        self.vqa_kwargs = kwargs
+        return {"answer": ["There is a traffic light ahead."]}
 
 
 def _patch_helper(monkeypatch):
@@ -101,3 +106,48 @@ def test_run_inference_uses_cfg_nav_when_navigation_weight_is_not_one(monkeypatc
         "use_classifier_free_guidance": True,
         "inference_guidance_weight": 1.5,
     }
+
+
+def test_run_vqa_passes_question_to_vqa_prompt(monkeypatch):
+    seen = {}
+
+    def fake_create_vqa_message(
+        frames,
+        question,
+        camera_indices=None,
+        num_frames_per_camera=4,
+    ):
+        seen["frames"] = frames
+        seen["question"] = question
+        seen["camera_indices"] = camera_indices
+        return [{"role": "user", "content": []}]
+
+    def fake_to_device(model_inputs, device):
+        seen["device"] = device
+        return model_inputs
+
+    monkeypatch.setattr(inference.helper, "create_vqa_message", fake_create_vqa_message)
+    monkeypatch.setattr(inference.helper, "to_device", fake_to_device)
+
+    model = FakeModel()
+    data = {
+        "image_frames": FakeFrames(),
+        "camera_indices": "camera-indices",
+    }
+
+    extra = inference.run_vqa(
+        model,
+        FakeProcessor(),
+        data,
+        question="What is visible?",
+    )
+
+    assert extra == {"answer": ["There is a traffic light ahead."]}
+    assert seen["question"] == "What is visible?"
+    assert seen["camera_indices"] == "camera-indices"
+    assert seen["device"] == "cuda"
+    assert model.vqa_kwargs["max_generation_length"] == 256
+
+
+def test_extract_answer_text_handles_nested_answer():
+    assert inference.extract_answer_text({"answer": [["The lane is clear."]]}) == "The lane is clear."

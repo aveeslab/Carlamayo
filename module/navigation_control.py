@@ -56,10 +56,17 @@ class NavigationControlState:
         self,
         navigation_text: str = "",
         navigation_weight: float = DEFAULT_NAVIGATION_WEIGHT,
+        mode: str = "navigation",
+        vqa_question: str = "",
     ):
         initial = parse_navigation_command(f"{navigation_text} | {navigation_weight}")
+        if mode not in {"normal", "navigation", "vqa"}:
+            raise ValueError("mode must be one of: normal, navigation, vqa")
+        self.mode = mode
         self.navigation_text = initial.text
         self.navigation_weight = initial.weight
+        self.vqa_question = vqa_question.strip()
+        self.vqa_answer = ""
         self.revision = 0
         self.paused = False
         self.input_text = ""
@@ -70,6 +77,23 @@ class NavigationControlState:
         return self.paused
 
     def submit_command(self, raw: str) -> NavigationCommand:
+        if self.mode == "normal":
+            self.input_text = ""
+            self.last_error = ""
+            return NavigationCommand(text="", weight=self.navigation_weight, revision=self.revision)
+        if self.mode == "vqa":
+            question = raw.strip()
+            self.vqa_question = question
+            self.vqa_answer = ""
+            self.revision += 1
+            self.input_text = ""
+            self.last_error = ""
+            return NavigationCommand(
+                text=self.vqa_question,
+                weight=self.navigation_weight,
+                revision=self.revision,
+            )
+
         command = parse_navigation_command(raw, default_weight=self.navigation_weight)
         self.navigation_text = command.text
         self.navigation_weight = command.weight
@@ -84,3 +108,7 @@ class NavigationControlState:
 
     def set_error(self, message: str) -> None:
         self.last_error = message
+
+    def set_vqa_answer(self, answer: str) -> None:
+        self.vqa_answer = answer
+        self.last_error = ""

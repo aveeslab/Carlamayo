@@ -148,35 +148,80 @@ def run_inference(
     return pred_xyz, extra
 
 
-def extract_cot_text(extra):
+def _extract_text_field(extra, key):
     if not isinstance(extra, dict):
         return ""
-    if "cot" not in extra:
+    if key not in extra:
         return ""
 
-    cot = extra["cot"]
-    if cot is None:
+    value = extra[key]
+    if value is None:
         return ""
 
     while True:
-        if isinstance(cot, str):
-            return cot
-        if isinstance(cot, (list, tuple)):
-            if len(cot) == 0:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, (list, tuple)):
+            if len(value) == 0:
                 return ""
-            cot = cot[0]
+            value = value[0]
             continue
-        if isinstance(cot, np.ndarray):
-            if cot.size == 0:
+        if isinstance(value, np.ndarray):
+            if value.size == 0:
                 return ""
-            cot = cot.flat[0]
+            value = value.flat[0]
             continue
-        if hasattr(cot, "numel") and hasattr(cot, "reshape"):
-            if int(cot.numel()) == 0:
+        if hasattr(value, "numel") and hasattr(value, "reshape"):
+            if int(value.numel()) == 0:
                 return ""
-            cot = cot.reshape(-1)[0].item()
+            value = value.reshape(-1)[0].item()
             continue
-        return str(cot)
+        return str(value)
+
+
+def extract_cot_text(extra):
+    return _extract_text_field(extra, "cot")
+
+
+def extract_answer_text(extra):
+    return _extract_text_field(extra, "answer")
+
+
+def run_vqa(
+    model,
+    processor,
+    data,
+    question: str,
+):
+    """Run Alpamayo VQA text generation for a driving-relevant question."""
+
+    question = question.strip()
+    if not question:
+        raise ValueError("question must not be empty")
+
+    messages = helper.create_vqa_message(
+        data["image_frames"].flatten(0, 1),
+        question=question,
+        camera_indices=data.get("camera_indices"),
+    )
+    inputs = processor.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=False,
+        continue_final_message=True,
+        return_dict=True,
+        return_tensors="pt",
+    )
+    model_inputs = helper.to_device({"tokenized_data": inputs}, "cuda")
+
+    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+        return model.generate_text(
+            data=model_inputs,
+            top_p=0.98,
+            temperature=0.6,
+            num_samples=1,
+            max_generation_length=256,
+        )
 
 
 def extract_trajectory_samples(pred_xyz):

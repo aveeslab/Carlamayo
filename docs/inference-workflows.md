@@ -83,21 +83,31 @@ The closed-loop script also defaults to `--cuda-linalg-library magma`; this
 avoids a cuSOLVER `torch.linalg.cholesky` initialization failure observed in
 the Alpamayo action-space conversion path.
 
-Optional pygame navigation UI:
+Optional pygame UI modes:
 
 ```bash
-python carla_alpamayo_closed_loop.py --pygame-ui --start-paused
+# Normal closed-loop trajectory control with camera UI.
+python carla_alpamayo_closed_loop.py --mode normal --pygame-ui
+
+# Navigation-controlled trajectory generation.
+python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused
+
+# VQA over the current camera frames; ego vehicle is held braked.
+python carla_alpamayo_closed_loop.py --mode vqa --pygame-ui --start-paused
 ```
 
 Controls:
 
 - `Ctrl+P`: pause or resume the synchronous CARLA loop.
-- `Enter`: apply the text in the input box as the next navigation instruction.
+- `Enter`: apply the text in the input box.
 - `Esc`: quit.
-- Input format: `Turn right in 30m | 1.0`. The text before `|` becomes
+- Navigation input format: `Turn right in 30m | 1.0`. The text before `|` becomes
   `navigation_text`; the number after `|` becomes the navigation guidance weight.
   Weight `1.0` uses normal nav conditioning, while other values use Alpamayo's
   classifier-free guidance navigation path.
+- VQA input format: plain driving-scene question, for example
+  `What traffic elements are visible and how should they influence driving?`.
+  The answer is shown in the pygame panel.
 
 Optional async inference mode:
 
