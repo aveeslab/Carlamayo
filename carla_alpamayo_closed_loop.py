@@ -21,6 +21,7 @@ from module.inference import (
     extract_trajectory_samples,
     load_model,
     prepare_model_input,
+    prepare_vqa_input,
     run_inference,
     run_vqa,
     select_trajectory_by_prev_similarity,
@@ -48,6 +49,23 @@ def capture_initial_ui_frame(carla_if, frame_count):
         "inference_time": 0.0,
     }
     return frame_count, ui_frame, telemetry
+
+
+def build_vqa_images_array(frame_buffer, camera_index: int, num_frames: int):
+    """Select recent frames from one camera for memory-light VQA."""
+
+    if num_frames < 1:
+        raise ValueError("num_frames must be positive")
+    if len(frame_buffer) < num_frames:
+        raise ValueError(f"need {num_frames} frames for VQA, got {len(frame_buffer)}")
+
+    selected_frames = frame_buffer[-num_frames:]
+    num_cameras = len(selected_frames[-1])
+    if camera_index < 0 or camera_index >= num_cameras:
+        raise ValueError(f"camera_index must be in [0, {num_cameras - 1}], got {camera_index}")
+
+    camera_frames = [frame_images[camera_index] for frame_images in selected_frames]
+    return np.stack(camera_frames, axis=0)[np.newaxis, ...]
 
 
 def parse_args():
@@ -101,6 +119,24 @@ def parse_args():
         help='Initial VQA question for --mode vqa, e.g. "Describe the scene.".',
     )
     parser.add_argument(
+        "--vqa-camera-index",
+        type=int,
+        default=1,
+        help="Camera index used for VQA input. Default: 1 (front camera).",
+    )
+    parser.add_argument(
+        "--vqa-num-frames",
+        type=int,
+        default=1,
+        help="Number of recent frames per selected camera for VQA. Default: 1.",
+    )
+    parser.add_argument(
+        "--vqa-max-generation-length",
+        type=int,
+        default=96,
+        help="Maximum VQA answer tokens. Lower values reduce CUDA memory. Default: 96.",
+    )
+    parser.add_argument(
         "--start-paused",
         action="store_true",
         help="Start the pygame UI paused so navigation text can be entered before the first tick.",
@@ -130,6 +166,18 @@ def parse_args():
 def main():
     args = parse_args()
     inference_interval_sec = 1.0
+    if args.vqa_num_frames < 1:
+        raise ValueError("--vqa-num-frames must be positive")
+    if args.vqa_num_frames > cfg.NUM_FRAMES:
+        raise ValueError(f"--vqa-num-frames cannot exceed cfg.NUM_FRAMES ({cfg.NUM_FRAMES})")
+    if args.vqa_camera_index < 0 or args.vqa_camera_index >= cfg.NUM_CAMERAS:
+        raise ValueError(
+            f"--vqa-camera-index must be in [0, {cfg.NUM_CAMERAS - 1}], "
+            f"got {args.vqa_camera_index}"
+        )
+    if args.vqa_max_generation_length < 1:
+        raise ValueError("--vqa-max-generation-length must be positive")
+    vqa_num_frames = int(args.vqa_num_frames)
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -141,6 +189,12 @@ def main():
     print(f"CARLA map: {args.carla_map}")
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
+    if args.mode == "vqa":
+        print(
+            "VQA memory profile: "
+            f"camera={args.vqa_camera_index}, frames={vqa_num_frames}, "
+            f"max_tokens={args.vqa_max_generation_length}"
+        )
 
     nav_state = NavigationControlState(
         args.navigation_text,
@@ -242,8 +296,29 @@ def main():
                 return _run_once(navigation_weight)
 
         def _run_vqa_with_linalg_fallback(model_data, question):
+            def _run_once():
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                return run_vqa(
+                    model,
+                    processor,
+                    model_data,
+                    question=question,
+                    max_generation_length=args.vqa_max_generation_length,
+                )
+
             try:
-                return run_vqa(model, processor, model_data, question=question)
+                return _run_once()
+            except torch.cuda.OutOfMemoryError:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                message = (
+                    "VQA ran out of CUDA memory. Try lowering "
+                    "--vqa-max-generation-length or keep --vqa-num-frames 1."
+                )
+                print(message)
+                nav_state.set_error(message)
+                raise
             except RuntimeError as exc:
                 if "CUSOLVER_STATUS_INTERNAL_ERROR" not in str(exc):
                     raise
@@ -254,7 +329,23 @@ def main():
                 print(message)
                 nav_state.set_error(message)
                 configure_cuda_linalg_library("magma")
-                return run_vqa(model, processor, model_data, question=question)
+                return _run_once()
+
+        def _build_full_images_array():
+            images_array = np.zeros(
+                (
+                    cfg.NUM_CAMERAS,
+                    cfg.NUM_FRAMES,
+                    cfg.IMG_HEIGHT,
+                    cfg.IMG_WIDTH,
+                    cfg.IMG_CHANNELS,
+                ),
+                dtype=np.uint8,
+            )
+            for t, frame_images in enumerate(frame_buffer):
+                for c in range(cfg.NUM_CAMERAS):
+                    images_array[c, t] = frame_images[c]
+            return images_array
 
         if args.async_mode:
             inference_request_q = queue.Queue(maxsize=1)
@@ -262,19 +353,20 @@ def main():
             inference_stop = threading.Event()
 
             def _build_inference_request():
-                images_array = np.zeros(
-                    (
-                        cfg.NUM_CAMERAS,
-                        cfg.NUM_FRAMES,
-                        cfg.IMG_HEIGHT,
-                        cfg.IMG_WIDTH,
-                        cfg.IMG_CHANNELS,
-                    ),
-                    dtype=np.uint8,
-                )
-                for t, frame_images in enumerate(frame_buffer):
-                    for c in range(cfg.NUM_CAMERAS):
-                        images_array[c, t] = frame_images[c]
+                if args.mode == "vqa":
+                    return {
+                        "mode": args.mode,
+                        "images_array": build_vqa_images_array(
+                            frame_buffer,
+                            args.vqa_camera_index,
+                            vqa_num_frames,
+                        ),
+                        "camera_indices": [args.vqa_camera_index],
+                        "vqa_question": nav_state.vqa_question,
+                        "prompt_revision": nav_state.revision,
+                    }
+
+                images_array = _build_full_images_array()
                 history_xyz, history_rot = carla_if.get_history_in_local_frame()
                 return {
                     "mode": args.mode,
@@ -298,12 +390,11 @@ def main():
                     req_frame = int(req["frame"])
                     try:
                         t0 = time.time()
-                        model_data = prepare_model_input(
-                            req["images_array"],
-                            req["history_xyz"],
-                            req["history_rot"],
-                        )
                         if req["mode"] == "vqa":
+                            model_data = prepare_vqa_input(
+                                req["images_array"],
+                                camera_indices=req["camera_indices"],
+                            )
                             extra = _run_vqa_with_linalg_fallback(
                                 model_data,
                                 question=req["vqa_question"],
@@ -319,6 +410,11 @@ def main():
                                 "prompt_revision": req["prompt_revision"],
                             }
                         else:
+                            model_data = prepare_model_input(
+                                req["images_array"],
+                                req["history_xyz"],
+                                req["history_rot"],
+                            )
                             navigation_text = (
                                 req["navigation_text"] if req["mode"] == "navigation" else ""
                             )
@@ -430,7 +526,7 @@ def main():
                 now_ts = time.time()
                 if args.mode == "vqa":
                     should_submit_inference = (
-                        len(frame_buffer) >= cfg.NUM_FRAMES
+                        len(frame_buffer) >= vqa_num_frames
                         and bool(nav_state.vqa_question)
                         and not pending_inference
                         and nav_state.revision != last_vqa_submitted_revision
@@ -519,30 +615,23 @@ def main():
                     else:
                         print(f"[Frame {frame_count}] Inference error: {latest_result['error']}")
             else:
-                if len(frame_buffer) >= cfg.NUM_FRAMES:
-                    images_array = np.zeros(
-                        (
-                            cfg.NUM_CAMERAS,
-                            cfg.NUM_FRAMES,
-                            cfg.IMG_HEIGHT,
-                            cfg.IMG_WIDTH,
-                            cfg.IMG_CHANNELS,
-                        ),
-                        dtype=np.uint8,
-                    )
-                    for t, frame_images in enumerate(frame_buffer):
-                        for c in range(cfg.NUM_CAMERAS):
-                            images_array[c, t] = frame_images[c]
-
-                    history_xyz, history_rot = carla_if.get_history_in_local_frame()
-
-                    model_data = prepare_model_input(images_array, history_xyz, history_rot)
+                required_frames = vqa_num_frames if args.mode == "vqa" else cfg.NUM_FRAMES
+                if len(frame_buffer) >= required_frames:
                     if args.mode == "vqa":
                         should_run_vqa = (
                             bool(nav_state.vqa_question)
                             and nav_state.revision != last_vqa_completed_revision
                         )
                         if should_run_vqa:
+                            images_array = build_vqa_images_array(
+                                frame_buffer,
+                                args.vqa_camera_index,
+                                vqa_num_frames,
+                            )
+                            model_data = prepare_vqa_input(
+                                images_array,
+                                camera_indices=[args.vqa_camera_index],
+                            )
                             model_start_time = time.time()
                             extra = _run_vqa_with_linalg_fallback(
                                 model_data,
@@ -557,6 +646,9 @@ def main():
                             print(f"    Q: {nav_state.vqa_question}")
                             print(f"    A: {answer[:160]}...")
                     else:
+                        images_array = _build_full_images_array()
+                        history_xyz, history_rot = carla_if.get_history_in_local_frame()
+                        model_data = prepare_model_input(images_array, history_xyz, history_rot)
                         navigation_text = nav_state.navigation_text if args.mode == "navigation" else ""
                         navigation_weight = (
                             nav_state.navigation_weight if args.mode == "navigation" else 1.0

@@ -1,3 +1,5 @@
+import numpy as np
+
 from module import inference
 
 
@@ -120,6 +122,7 @@ def test_run_vqa_passes_question_to_vqa_prompt(monkeypatch):
         seen["frames"] = frames
         seen["question"] = question
         seen["camera_indices"] = camera_indices
+        seen["num_frames_per_camera"] = num_frames_per_camera
         return [{"role": "user", "content": []}]
 
     def fake_to_device(model_inputs, device):
@@ -133,6 +136,7 @@ def test_run_vqa_passes_question_to_vqa_prompt(monkeypatch):
     data = {
         "image_frames": FakeFrames(),
         "camera_indices": "camera-indices",
+        "num_frames_per_camera": 1,
     }
 
     extra = inference.run_vqa(
@@ -140,13 +144,27 @@ def test_run_vqa_passes_question_to_vqa_prompt(monkeypatch):
         FakeProcessor(),
         data,
         question="What is visible?",
+        max_generation_length=64,
     )
 
     assert extra == {"answer": ["There is a traffic light ahead."]}
     assert seen["question"] == "What is visible?"
     assert seen["camera_indices"] == "camera-indices"
+    assert seen["num_frames_per_camera"] == 1
     assert seen["device"] == "cuda"
-    assert model.vqa_kwargs["max_generation_length"] == 256
+    assert model.vqa_kwargs["max_generation_length"] == 64
+
+
+def test_prepare_vqa_input_preserves_selected_camera_and_frame_shape():
+    images_array = np.zeros((1, 2, 3, 4, 3), dtype=np.uint8)
+    images_array[0, 1, :, :, :] = 7
+
+    data = inference.prepare_vqa_input(images_array, camera_indices=[1])
+
+    assert tuple(data["image_frames"].shape) == (1, 2, 3, 3, 4)
+    assert int(data["image_frames"][0, 1, 0, 0, 0]) == 7
+    assert data["camera_indices"].tolist() == [1]
+    assert data["num_frames_per_camera"] == 2
 
 
 def test_extract_answer_text_handles_nested_answer():

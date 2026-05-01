@@ -94,6 +94,10 @@ python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-pause
 
 # VQA over the current camera frames; ego vehicle is held braked.
 python carla_alpamayo_closed_loop.py --mode vqa --pygame-ui --start-paused
+
+# Lower VQA generation memory further if needed.
+python carla_alpamayo_closed_loop.py --mode vqa --pygame-ui --start-paused \
+  --vqa-camera-index 1 --vqa-num-frames 1 --vqa-max-generation-length 64
 ```
 
 Controls:
@@ -107,7 +111,9 @@ Controls:
   classifier-free guidance navigation path.
 - VQA input format: plain driving-scene question, for example
   `What traffic elements are visible and how should they influence driving?`.
-  The answer is shown in the pygame panel.
+  The answer is shown in the pygame panel. By default VQA uses only the latest
+  front-camera frame and 96 answer tokens because CARLA plus Alpamayo can exceed
+  16 GB VRAM when all cameras/history frames are sent to the VLM generator.
 
 Optional async inference mode:
 

@@ -58,8 +58,10 @@ python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-pause
 In `navigation` mode, type `Turn right in 30m | 1.0`, then press `Enter`. In
 `vqa` mode, run `python carla_alpamayo_closed_loop.py --mode vqa --pygame-ui
 --start-paused`, type a driving-scene question, and press `Enter` to generate
-an answer using Alpamayo VQA. Use `Ctrl+P` to pause/resume and `Esc` to quit.
-Plain spaces and `p` characters are accepted in the text input.
+an answer using Alpamayo VQA. VQA defaults to the latest front-camera frame and
+`--vqa-max-generation-length 96` to fit 16 GB GPUs; lower it to `64` if needed.
+Use `Ctrl+P` to pause/resume and `Esc` to quit. Plain spaces and `p` characters
+are accepted in the text input.
 
 ## Project Structure
 
