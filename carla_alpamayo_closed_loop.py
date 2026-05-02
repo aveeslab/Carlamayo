@@ -16,6 +16,7 @@ from module.latency_control import NormalModeLatencyStats, should_refresh_normal
 from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
 from module.trajectory_cache import alpamayo_local_to_world, world_to_alpamayo_local
+from module.vlm_generate_optimization import VlmGenerateTiming
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.carla_interface import CARLAInterface
 from module.inference import (
@@ -107,10 +108,10 @@ def parse_args():
     parser.add_argument(
         "--normal-inference-interval-frames",
         type=int,
-        default=10,
+        default=0,
         help=(
             "Minimum synchronous CARLA frames between normal-mode model refreshes. "
-            "Default: 10 (1.0 simulated second at fixed_delta_seconds=0.1). "
+            "Default: 0 (refresh every ready frame). "
             "Set 0 to reproduce the per-ready-frame baseline."
         ),
     )
@@ -134,6 +135,26 @@ def parse_args():
         "--latency-stats-json",
         default="",
         help="Write normal-mode latency stats to this JSON file on shutdown.",
+    )
+    parser.add_argument(
+        "--keep-generate-logits",
+        dest="disable_unused_generate_logits",
+        action="store_false",
+        default=True,
+        help=(
+            "Keep Alpamayo VLM returned logits during trajectory generation. "
+            "Default disables these unused returned logits to reduce single-call latency/memory."
+        ),
+    )
+    parser.add_argument(
+        "--vlm-image-pixels",
+        type=int,
+        default=65536,
+        help=(
+            "Per-image min/max pixel budget passed to the Qwen-VL processor. "
+            "Default: 65536 for lower single-call VLM latency. Use 196608 for "
+            "the original Alpamayo image-token budget."
+        ),
     )
     parser.add_argument(
         "--carla-map",
@@ -164,6 +185,8 @@ def main():
         raise ValueError("--normal-inference-interval-frames must be non-negative")
     if args.max_frames < 0:
         raise ValueError("--max-frames must be non-negative")
+    if args.vlm_image_pixels <= 0:
+        raise ValueError("--vlm-image-pixels must be positive")
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -209,6 +232,7 @@ def main():
     latest_ui_frame = None
     latest_telemetry = {}
     latency_stats = NormalModeLatencyStats()
+    vlm_generate_timing = VlmGenerateTiming()
     inference_request_q = None
     inference_result_q = None
     inference_stop = None
@@ -257,6 +281,9 @@ def main():
                     model_data,
                     navigation_text=navigation_text,
                     navigation_weight=weight,
+                    vlm_generate_timing=vlm_generate_timing,
+                    disable_unused_generate_logits=args.disable_unused_generate_logits,
+                    vlm_image_pixels=args.vlm_image_pixels,
                 )
 
             try:
@@ -794,6 +821,11 @@ def main():
                 interval_frames=args.normal_inference_interval_frames,
                 mode=args.mode,
             )
+            stats_dict.update(vlm_generate_timing.to_dict())
+            stats_dict["vlm_image_pixels"] = int(args.vlm_image_pixels)
+            stats_dict["disable_unused_generate_logits"] = bool(
+                args.disable_unused_generate_logits
+            )
             print(
                 "Normal latency stats: "
                 f"eligible_frames={stats_dict['eligible_frames']}, "
@@ -801,7 +833,8 @@ def main():
                 f"trajectory_reuse_frames={stats_dict['trajectory_reuse_frames']}, "
                 f"vlm_call_reduction_vs_per_frame_baseline="
                 f"{stats_dict['vlm_call_reduction_vs_per_frame_baseline'] * 100:.1f}%, "
-                f"total_model_time={stats_dict['total_model_time_sec']:.2f}s"
+                f"total_model_time={stats_dict['total_model_time_sec']:.2f}s, "
+                f"avg_vlm_generate_time={stats_dict['avg_vlm_generate_time_sec']:.2f}s"
             )
             if args.latency_stats_json:
                 stats_path = Path(args.latency_stats_json)

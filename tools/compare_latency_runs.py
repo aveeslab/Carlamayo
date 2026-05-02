@@ -21,11 +21,24 @@ def _model_time_per_frame(stats: dict) -> float:
     return float(stats.get("total_model_time_sec", 0.0)) / eligible_frames
 
 
-def compare_latency(baseline: dict, optimized: dict) -> dict[str, float]:
-    baseline_time = _model_time_per_frame(baseline)
-    optimized_time = _model_time_per_frame(optimized)
+def _vlm_generate_time(stats: dict) -> float:
+    if "avg_vlm_generate_time_sec" in stats:
+        return float(stats["avg_vlm_generate_time_sec"])
+    calls = int(stats.get("vlm_generate_calls", 0))
+    if calls <= 0:
+        raise ValueError("stats must include avg_vlm_generate_time_sec or positive vlm_generate_calls")
+    return float(stats.get("total_vlm_generate_time_sec", 0.0)) / calls
+
+
+def compare_latency(baseline: dict, optimized: dict, *, metric: str = "model-frame") -> dict[str, float]:
+    if metric == "vlm-generate":
+        baseline_time = _vlm_generate_time(baseline)
+        optimized_time = _vlm_generate_time(optimized)
+    else:
+        baseline_time = _model_time_per_frame(baseline)
+        optimized_time = _model_time_per_frame(optimized)
     if baseline_time <= 0:
-        raise ValueError("baseline model_time_per_eligible_frame_sec must be positive")
+        raise ValueError("baseline latency metric must be positive")
     latency_reduction = 1.0 - (optimized_time / baseline_time)
     baseline_refreshes = int(baseline.get("model_refreshes", 0))
     optimized_refreshes = int(optimized.get("model_refreshes", 0))
@@ -50,6 +63,15 @@ def parse_args() -> argparse.Namespace:
         default=0.30,
         help="Minimum latency reduction required for a passing result. Default: 0.30.",
     )
+    parser.add_argument(
+        "--metric",
+        choices=("model-frame", "vlm-generate"),
+        default="model-frame",
+        help=(
+            "Latency metric to compare. Use 'vlm-generate' for single-call "
+            "model.generate() hot-path benchmarking."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -57,15 +79,15 @@ def main() -> int:
     args = parse_args()
     baseline = _load_stats(args.baseline_json)
     optimized = _load_stats(args.optimized_json)
-    metrics = compare_latency(baseline, optimized)
+    metrics = compare_latency(baseline, optimized, metric=args.metric)
     passed = metrics["latency_reduction"] >= args.min_reduction
     status = "PASS" if passed else "FAIL"
     print(
         f"{status}: latency_reduction={metrics['latency_reduction'] * 100:.1f}% "
         f"(required>={args.min_reduction * 100:.1f}%), "
-        f"baseline_model_time_per_frame="
+        f"baseline_{args.metric.replace('-', '_')}_time="
         f"{metrics['baseline_model_time_per_frame_sec']:.4f}s, "
-        f"optimized_model_time_per_frame="
+        f"optimized_{args.metric.replace('-', '_')}_time="
         f"{metrics['optimized_model_time_per_frame_sec']:.4f}s, "
         f"vlm_call_reduction={metrics['vlm_call_reduction'] * 100:.1f}%"
     )

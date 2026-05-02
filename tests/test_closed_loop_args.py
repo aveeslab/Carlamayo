@@ -35,12 +35,12 @@ def test_closed_loop_defaults_to_normal_mode(monkeypatch):
     assert args.mode == "normal"
 
 
-def test_closed_loop_defaults_normal_inference_interval_to_one_second(monkeypatch):
+def test_closed_loop_defaults_normal_inference_interval_to_baseline(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
 
     args = closed_loop.parse_args()
 
-    assert args.normal_inference_interval_frames == 10
+    assert args.normal_inference_interval_frames == 0
 
 
 def test_closed_loop_accepts_baseline_normal_inference_interval(monkeypatch):
@@ -74,6 +74,46 @@ def test_closed_loop_accepts_latency_benchmark_controls(monkeypatch):
     assert args.max_frames == 120
     assert args.no_video is True
     assert args.latency_stats_json == "run.json"
+
+
+def test_closed_loop_disables_unused_generate_logits_by_default(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.disable_unused_generate_logits is True
+
+
+def test_closed_loop_can_keep_generate_logits_for_baseline(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--keep-generate-logits"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.disable_unused_generate_logits is False
+
+
+def test_closed_loop_defaults_vlm_image_pixels_to_fast_balanced_cap(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.vlm_image_pixels == 65536
+
+
+def test_closed_loop_accepts_full_vlm_image_pixel_baseline(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--vlm-image-pixels", "196608"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.vlm_image_pixels == 196608
 
 
 def test_closed_loop_accepts_vqa_mode_and_initial_question(monkeypatch):

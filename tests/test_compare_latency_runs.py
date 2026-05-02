@@ -38,6 +38,34 @@ def test_compare_latency_runs_accepts_target_reduction(tmp_path):
     assert "PASS" in result.stdout
 
 
+def test_compare_latency_runs_can_compare_vlm_generate_time(tmp_path):
+    baseline = tmp_path / "baseline.json"
+    optimized = tmp_path / "optimized.json"
+    baseline.write_text(json.dumps({"avg_vlm_generate_time_sec": 2.0}))
+    optimized.write_text(json.dumps({"avg_vlm_generate_time_sec": 1.2}))
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "tools/compare_latency_runs.py",
+            str(baseline),
+            str(optimized),
+            "--metric",
+            "vlm-generate",
+            "--min-reduction",
+            "0.30",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "latency_reduction=40.0%" in result.stdout
+    assert "baseline_vlm_generate_time=2.0000s" in result.stdout
+    assert "optimized_vlm_generate_time=1.2000s" in result.stdout
+
+
 def test_compare_latency_runs_rejects_below_target(tmp_path):
     baseline = tmp_path / "baseline.json"
     optimized = tmp_path / "optimized.json"

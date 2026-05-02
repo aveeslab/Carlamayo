@@ -12,6 +12,7 @@ from alpamayo1_5 import helper
 
 from . import config as cfg
 from .alpamayo_compat import patch_legacy_hydra_targets
+from .vlm_generate_optimization import VlmGenerateTiming, optimized_vlm_generate
 
 patch_legacy_hydra_targets()
 
@@ -91,6 +92,9 @@ def run_inference(
     data,
     navigation_text: str | None = None,
     navigation_weight: float = 1.0,
+    vlm_generate_timing: VlmGenerateTiming | None = None,
+    disable_unused_generate_logits: bool = True,
+    vlm_image_pixels: int | None = None,
 ):
     """Run Alpamayo inference locally.
 
@@ -108,6 +112,13 @@ def run_inference(
         nav_text=nav_text or None,
     )
 
+    processor_kwargs = {}
+    if vlm_image_pixels is not None and int(vlm_image_pixels) > 0:
+        processor_kwargs = {
+            "min_pixels": int(vlm_image_pixels),
+            "max_pixels": int(vlm_image_pixels),
+        }
+
     inputs = processor.apply_chat_template(
         messages,
         tokenize=True,
@@ -115,6 +126,7 @@ def run_inference(
         continue_final_message=True,
         return_dict=True,
         return_tensors="pt",
+        **processor_kwargs,
     )
 
     model_inputs = {
@@ -126,7 +138,9 @@ def run_inference(
 
     diffusion_kwargs = {"inference_step": 10}
     inference_fn = model.sample_trajectories_from_data_with_vlm_rollout
+    use_cfg_nav = False
     if nav_text and not math.isclose(float(navigation_weight), 1.0):
+        use_cfg_nav = True
         inference_fn = model.sample_trajectories_from_data_with_vlm_rollout_cfg_nav
         diffusion_kwargs = {
             **diffusion_kwargs,
@@ -134,7 +148,16 @@ def run_inference(
             "inference_guidance_weight": float(navigation_weight),
         }
 
-    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+    disable_generate_logits = disable_unused_generate_logits and not use_cfg_nav
+    with (
+        optimized_vlm_generate(
+            model,
+            disable_output_logits=disable_generate_logits,
+            timing=vlm_generate_timing,
+        ),
+        torch.inference_mode(),
+        torch.autocast("cuda", dtype=torch.bfloat16),
+    ):
         pred_xyz, pred_rot, extra = inference_fn(
             data=model_inputs,
             top_p=0.98,
