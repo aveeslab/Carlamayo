@@ -117,6 +117,17 @@ def parse_args():
         help="Start the pygame UI paused so navigation text can be entered before the first tick.",
     )
     parser.add_argument(
+        "--max-frames",
+        type=int,
+        default=0,
+        help="Stop after this many CARLA frames. Default: 0 means run until interrupted.",
+    )
+    parser.add_argument(
+        "--no-video",
+        action="store_true",
+        help="Disable MP4 recording for latency benchmark runs.",
+    )
+    parser.add_argument(
         "--carla-map",
         default=cfg.CARLA_MAP,
         help=f"CARLA map to load before spawning actors. Default: {cfg.CARLA_MAP}.",
@@ -143,6 +154,8 @@ def main():
     inference_interval_sec = 1.0
     if args.normal_inference_interval_frames < 0:
         raise ValueError("--normal-inference-interval-frames must be non-negative")
+    if args.max_frames < 0:
+        raise ValueError("--max-frames must be non-negative")
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -154,6 +167,9 @@ def main():
     print(f"CARLA map: {args.carla_map}")
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
+    print(f"Video recording: {'OFF' if args.no_video else ('ON' if cfg.SAVE_VIDEO else 'OFF')}")
+    if args.max_frames:
+        print(f"Max frames: {args.max_frames}")
     if args.mode == "normal":
         print(f"Normal model refresh interval: {args.normal_inference_interval_frames} frames")
 
@@ -179,7 +195,8 @@ def main():
     print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
     carla_if = CARLAInterface()
-    video_recorder = VideoRecorder(cfg.OUTPUT_VIDEO, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
+    save_video = cfg.SAVE_VIDEO and not args.no_video
+    video_recorder = VideoRecorder(cfg.OUTPUT_VIDEO, fps=cfg.VIDEO_FPS) if save_video else None
     pygame_ui = None
     latest_ui_frame = None
     latest_telemetry = {}
@@ -380,7 +397,7 @@ def main():
             worker_thread.start()
 
         print("\nStarting control loop...")
-        if cfg.SAVE_VIDEO:
+        if save_video:
             print(f"Recording video to: {cfg.OUTPUT_VIDEO}")
         print("-" * 60)
 
@@ -700,7 +717,7 @@ def main():
                         paused=nav_state.paused,
                     )
                     latest_ui_frame = vis_frame
-                    if cfg.SAVE_VIDEO:
+                    if save_video:
                         video_recorder.add_frame(vis_frame)
 
                 latest_telemetry = {
@@ -732,6 +749,10 @@ def main():
                 if pygame_ui is not None:
                     pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
 
+            if args.max_frames and frame_count >= args.max_frames:
+                print(f"\nReached --max-frames={args.max_frames}; stopping.")
+                break
+
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
     except Exception as e:
@@ -746,7 +767,7 @@ def main():
                 pass
             if worker_thread is not None:
                 worker_thread.join(timeout=2.0)
-        if cfg.SAVE_VIDEO and video_recorder:
+        if save_video and video_recorder:
             video_recorder.save()
         if pygame_ui is not None:
             pygame_ui.close()
