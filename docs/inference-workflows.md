@@ -83,11 +83,26 @@ The closed-loop script also defaults to `--cuda-linalg-library magma`; this
 avoids a cuSOLVER `torch.linalg.cholesky` initialization failure observed in
 the Alpamayo action-space conversion path.
 
+Normal mode latency optimization:
+
+- Default `--normal-inference-interval-frames 10` reuses the latest generated
+  6.4-second future trajectory for up to 10 synchronous CARLA frames
+  (1.0 simulated second). This reduces `vlm.generate()` calls in the control
+  pipeline without changing Alpamayo model sampling parameters.
+- Baseline run: add `--normal-inference-interval-frames 0` to refresh the model
+  on every ready frame.
+- On shutdown, compare `vlm_call_reduction_vs_per_frame_baseline` in the
+  printed `Normal latency stats`; the target optimization gate is `>=30%`.
+
 Optional pygame UI modes:
 
 ```bash
 # Normal closed-loop trajectory control with camera UI.
 python carla_alpamayo_closed_loop.py --mode normal --pygame-ui
+
+# Baseline for latency comparison.
+python carla_alpamayo_closed_loop.py --mode normal --pygame-ui \
+  --normal-inference-interval-frames 0
 
 # Navigation-controlled trajectory generation.
 python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused

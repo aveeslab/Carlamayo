@@ -35,6 +35,26 @@ def test_closed_loop_defaults_to_normal_mode(monkeypatch):
     assert args.mode == "normal"
 
 
+def test_closed_loop_defaults_normal_inference_interval_to_one_second(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.normal_inference_interval_frames == 10
+
+
+def test_closed_loop_accepts_baseline_normal_inference_interval(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--normal-inference-interval-frames", "0"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.normal_inference_interval_frames == 0
+
+
 def test_closed_loop_accepts_vqa_mode_and_initial_question(monkeypatch):
     monkeypatch.setattr(
         sys,
