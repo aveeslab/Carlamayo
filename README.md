@@ -50,7 +50,8 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 the MAGMA CUDA linalg backend for local GPU stability. In `normal` mode it also
 reuses each generated future trajectory for 10 CARLA frames by default, reducing
 Alpamayo VLM generation calls without changing the model output itself. Use
-`--normal-inference-interval-frames 0` for the per-ready-frame baseline.
+`--normal-inference-interval-frames 0` for the per-ready-frame baseline, and
+`--max-frames N --no-video` for repeatable latency comparisons.
 
 ```bash
 source a1_5_carla_venv/bin/activate
