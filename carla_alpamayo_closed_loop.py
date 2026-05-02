@@ -1,6 +1,8 @@
 """Modular entrypoint for CARLA closed-loop control with Alpamayo."""
 
 import argparse
+import json
+from pathlib import Path
 import queue
 import threading
 import time
@@ -126,6 +128,11 @@ def parse_args():
         "--no-video",
         action="store_true",
         help="Disable MP4 recording for latency benchmark runs.",
+    )
+    parser.add_argument(
+        "--latency-stats-json",
+        default="",
+        help="Write normal-mode latency stats to this JSON file on shutdown.",
     )
     parser.add_argument(
         "--carla-map",
@@ -773,15 +780,24 @@ def main():
             pygame_ui.close()
         carla_if.cleanup()
         if args.mode == "normal":
+            stats_dict = latency_stats.to_dict(
+                interval_frames=args.normal_inference_interval_frames,
+                mode=args.mode,
+            )
             print(
                 "Normal latency stats: "
-                f"eligible_frames={latency_stats.eligible_frames}, "
-                f"model_refreshes={latency_stats.model_refreshes}, "
-                f"trajectory_reuse_frames={latency_stats.reuse_frames}, "
+                f"eligible_frames={stats_dict['eligible_frames']}, "
+                f"model_refreshes={stats_dict['model_refreshes']}, "
+                f"trajectory_reuse_frames={stats_dict['trajectory_reuse_frames']}, "
                 f"vlm_call_reduction_vs_per_frame_baseline="
-                f"{latency_stats.vlm_call_reduction * 100:.1f}%, "
-                f"total_model_time={latency_stats.total_model_time_sec:.2f}s"
+                f"{stats_dict['vlm_call_reduction_vs_per_frame_baseline'] * 100:.1f}%, "
+                f"total_model_time={stats_dict['total_model_time_sec']:.2f}s"
             )
+            if args.latency_stats_json:
+                stats_path = Path(args.latency_stats_json)
+                stats_path.parent.mkdir(parents=True, exist_ok=True)
+                stats_path.write_text(json.dumps(stats_dict, indent=2), encoding="utf-8")
+                print(f"Wrote latency stats JSON: {stats_path}")
 
     print("\nStopped.")
 

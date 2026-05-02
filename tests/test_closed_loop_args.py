@@ -59,13 +59,21 @@ def test_closed_loop_accepts_latency_benchmark_controls(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
-        ["carla_alpamayo_closed_loop.py", "--max-frames", "120", "--no-video"],
+        [
+            "carla_alpamayo_closed_loop.py",
+            "--max-frames",
+            "120",
+            "--no-video",
+            "--latency-stats-json",
+            "run.json",
+        ],
     )
 
     args = closed_loop.parse_args()
 
     assert args.max_frames == 120
     assert args.no_video is True
+    assert args.latency_stats_json == "run.json"
 
 
 def test_closed_loop_accepts_vqa_mode_and_initial_question(monkeypatch):

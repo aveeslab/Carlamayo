@@ -56,3 +56,24 @@ def test_latency_stats_reports_vlm_call_reduction_against_per_frame_baseline():
     assert stats.reuse_frames == 7
     assert stats.total_model_time_sec == 6.0
     assert stats.vlm_call_reduction == 0.7
+
+
+def test_latency_stats_serializes_machine_readable_metrics():
+    stats = NormalModeLatencyStats()
+    for _ in range(4):
+        stats.record_eligible_frame()
+    stats.record_model_refresh(1.5)
+    stats.record_reuse_frame()
+    stats.record_reuse_frame()
+    stats.record_reuse_frame()
+
+    data = stats.to_dict(interval_frames=10, mode="normal")
+
+    assert data["mode"] == "normal"
+    assert data["normal_inference_interval_frames"] == 10
+    assert data["eligible_frames"] == 4
+    assert data["model_refreshes"] == 1
+    assert data["trajectory_reuse_frames"] == 3
+    assert data["total_model_time_sec"] == 1.5
+    assert data["model_time_per_eligible_frame_sec"] == 0.375
+    assert data["vlm_call_reduction_vs_per_frame_baseline"] == 0.75
