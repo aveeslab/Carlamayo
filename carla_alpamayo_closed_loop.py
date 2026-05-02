@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 from module import config as cfg
+from module.latency_control import NormalModeLatencyStats, should_refresh_normal_inference
 from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
 from module.visualization import VideoRecorder, create_visualization_frame
@@ -101,6 +102,16 @@ def parse_args():
         help='Initial VQA question for --mode vqa, e.g. "Describe the scene.".',
     )
     parser.add_argument(
+        "--normal-inference-interval-frames",
+        type=int,
+        default=10,
+        help=(
+            "Minimum synchronous CARLA frames between normal-mode model refreshes. "
+            "Default: 10 (1.0 simulated second at fixed_delta_seconds=0.1). "
+            "Set 0 to reproduce the per-ready-frame baseline."
+        ),
+    )
+    parser.add_argument(
         "--start-paused",
         action="store_true",
         help="Start the pygame UI paused so navigation text can be entered before the first tick.",
@@ -130,6 +141,8 @@ def parse_args():
 def main():
     args = parse_args()
     inference_interval_sec = 1.0
+    if args.normal_inference_interval_frames < 0:
+        raise ValueError("--normal-inference-interval-frames must be non-negative")
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -141,6 +154,8 @@ def main():
     print(f"CARLA map: {args.carla_map}")
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
+    if args.mode == "normal":
+        print(f"Normal model refresh interval: {args.normal_inference_interval_frames} frames")
 
     nav_state = NavigationControlState(
         args.navigation_text,
@@ -168,6 +183,11 @@ def main():
     pygame_ui = None
     latest_ui_frame = None
     latest_telemetry = {}
+    latency_stats = NormalModeLatencyStats()
+    inference_request_q = None
+    inference_result_q = None
+    inference_stop = None
+    worker_thread = None
 
     if args.pygame_ui:
         from module.pygame_ui import ClosedLoopPygameUI
@@ -197,14 +217,11 @@ def main():
         current_inference_time = 0.0
         frame_buffer = []
         current_trajectory_ts = None
+        last_model_refresh_frame = None
         prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
 
         pending_inference = False
         last_inference_submit_ts = 0.0
-        inference_request_q = None
-        inference_result_q = None
-        inference_stop = None
-        worker_thread = None
 
         def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
             def _run_once(weight):
@@ -436,6 +453,20 @@ def main():
                         and nav_state.revision != last_vqa_submitted_revision
                         and nav_state.revision != last_vqa_completed_revision
                     )
+                elif args.mode == "normal":
+                    frame_ready = len(frame_buffer) >= cfg.NUM_FRAMES
+                    if frame_ready:
+                        latency_stats.record_eligible_frame()
+                    should_submit_inference = should_refresh_normal_inference(
+                        frame_ready=frame_ready,
+                        has_trajectory=current_trajectory is not None,
+                        pending_inference=pending_inference,
+                        frame_count=frame_count,
+                        last_refresh_frame=last_model_refresh_frame,
+                        min_interval_frames=args.normal_inference_interval_frames,
+                    )
+                    if frame_ready and not should_submit_inference and current_trajectory is not None:
+                        latency_stats.record_reuse_frame()
                 else:
                     should_submit_inference = (
                         len(frame_buffer) >= cfg.NUM_FRAMES
@@ -501,6 +532,9 @@ def main():
                         current_cot = extract_cot_text(extra)
                         current_inference_time = inference_time
                         current_trajectory_ts = float(latest_result["result_ts"])
+                        if latest_result.get("mode") == "normal":
+                            last_model_refresh_frame = frame_count
+                            latency_stats.record_model_refresh(inference_time)
 
                         print(
                             f"[Frame {frame_count}] Inference done: {inference_time:.2f}s "
@@ -520,24 +554,22 @@ def main():
                         print(f"[Frame {frame_count}] Inference error: {latest_result['error']}")
             else:
                 if len(frame_buffer) >= cfg.NUM_FRAMES:
-                    images_array = np.zeros(
-                        (
-                            cfg.NUM_CAMERAS,
-                            cfg.NUM_FRAMES,
-                            cfg.IMG_HEIGHT,
-                            cfg.IMG_WIDTH,
-                            cfg.IMG_CHANNELS,
-                        ),
-                        dtype=np.uint8,
-                    )
-                    for t, frame_images in enumerate(frame_buffer):
-                        for c in range(cfg.NUM_CAMERAS):
-                            images_array[c, t] = frame_images[c]
-
-                    history_xyz, history_rot = carla_if.get_history_in_local_frame()
-
-                    model_data = prepare_model_input(images_array, history_xyz, history_rot)
                     if args.mode == "vqa":
+                        images_array = np.zeros(
+                            (
+                                cfg.NUM_CAMERAS,
+                                cfg.NUM_FRAMES,
+                                cfg.IMG_HEIGHT,
+                                cfg.IMG_WIDTH,
+                                cfg.IMG_CHANNELS,
+                            ),
+                            dtype=np.uint8,
+                        )
+                        for t, frame_images in enumerate(frame_buffer):
+                            for c in range(cfg.NUM_CAMERAS):
+                                images_array[c, t] = frame_images[c]
+                        history_xyz, history_rot = carla_if.get_history_in_local_frame()
+                        model_data = prepare_model_input(images_array, history_xyz, history_rot)
                         should_run_vqa = (
                             bool(nav_state.vqa_question)
                             and nav_state.revision != last_vqa_completed_revision
@@ -557,43 +589,79 @@ def main():
                             print(f"    Q: {nav_state.vqa_question}")
                             print(f"    A: {answer[:160]}...")
                     else:
+                        should_run_inference = True
+                        if args.mode == "normal":
+                            latency_stats.record_eligible_frame()
+                            should_run_inference = should_refresh_normal_inference(
+                                frame_ready=True,
+                                has_trajectory=current_trajectory is not None,
+                                pending_inference=False,
+                                frame_count=frame_count,
+                                last_refresh_frame=last_model_refresh_frame,
+                                min_interval_frames=args.normal_inference_interval_frames,
+                            )
+                            if not should_run_inference and current_trajectory is not None:
+                                latency_stats.record_reuse_frame()
+                        if not should_run_inference:
+                            model_data = None
+                        else:
+                            images_array = np.zeros(
+                                (
+                                    cfg.NUM_CAMERAS,
+                                    cfg.NUM_FRAMES,
+                                    cfg.IMG_HEIGHT,
+                                    cfg.IMG_WIDTH,
+                                    cfg.IMG_CHANNELS,
+                                ),
+                                dtype=np.uint8,
+                            )
+                            for t, frame_images in enumerate(frame_buffer):
+                                for c in range(cfg.NUM_CAMERAS):
+                                    images_array[c, t] = frame_images[c]
+                            history_xyz, history_rot = carla_if.get_history_in_local_frame()
+                            model_data = prepare_model_input(images_array, history_xyz, history_rot)
+
                         navigation_text = nav_state.navigation_text if args.mode == "navigation" else ""
                         navigation_weight = (
                             nav_state.navigation_weight if args.mode == "navigation" else 1.0
                         )
-                        model_start_time = time.time()
-                        pred_xyz, extra = _run_inference_with_nav_fallback(
-                            model_data,
-                            navigation_text=navigation_text,
-                            navigation_weight=navigation_weight,
-                        )
-                        model_inference_time = time.time() - model_start_time
-
-                        traj_samples = extract_trajectory_samples(pred_xyz)
-                        selected_idx, _similarity_scores = select_trajectory_by_prev_similarity(
-                            traj_samples,
-                            prev_selected_trajectory,
-                        )
-                        current_selected_traj_idx = selected_idx
-                        current_trajectory = traj_samples[selected_idx]
-                        prev_selected_trajectory = current_trajectory.copy()
-                        current_pred_xyz = traj_samples
-                        current_cot = extract_cot_text(extra)
-                        current_inference_time = model_inference_time
-                        current_trajectory_ts = time.time()
-
-                        print(f"[Frame {frame_count}] Inference: {model_inference_time:.2f}s")
-                        print(f"    CoT: {current_cot[:60]}...")
-                        if args.mode == "navigation":
-                            print(
-                                f"    Nav: {nav_state.navigation_text or '(none)'} "
-                                f"(weight={nav_state.navigation_weight:.2f})"
+                        if model_data is not None:
+                            model_start_time = time.time()
+                            pred_xyz, extra = _run_inference_with_nav_fallback(
+                                model_data,
+                                navigation_text=navigation_text,
+                                navigation_weight=navigation_weight,
                             )
-                        print(
-                            f"    Selected traj sample: {current_selected_traj_idx}/"
-                            f"{cfg.NUM_TRAJ_SAMPLES - 1}"
-                        )
-                        print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
+                            model_inference_time = time.time() - model_start_time
+
+                            traj_samples = extract_trajectory_samples(pred_xyz)
+                            selected_idx, _similarity_scores = select_trajectory_by_prev_similarity(
+                                traj_samples,
+                                prev_selected_trajectory,
+                            )
+                            current_selected_traj_idx = selected_idx
+                            current_trajectory = traj_samples[selected_idx]
+                            prev_selected_trajectory = current_trajectory.copy()
+                            current_pred_xyz = traj_samples
+                            current_cot = extract_cot_text(extra)
+                            current_inference_time = model_inference_time
+                            current_trajectory_ts = time.time()
+                            if args.mode == "normal":
+                                last_model_refresh_frame = frame_count
+                                latency_stats.record_model_refresh(model_inference_time)
+
+                            print(f"[Frame {frame_count}] Inference: {model_inference_time:.2f}s")
+                            print(f"    CoT: {current_cot[:60]}...")
+                            if args.mode == "navigation":
+                                print(
+                                    f"    Nav: {nav_state.navigation_text or '(none)'} "
+                                    f"(weight={nav_state.navigation_weight:.2f})"
+                                )
+                            print(
+                                f"    Selected traj sample: {current_selected_traj_idx}/"
+                                f"{cfg.NUM_TRAJ_SAMPLES - 1}"
+                            )
+                            print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
 
             if current_trajectory is not None:
                 vehicle_tf = carla_if.ego_vehicle.get_transform()
@@ -683,6 +751,16 @@ def main():
         if pygame_ui is not None:
             pygame_ui.close()
         carla_if.cleanup()
+        if args.mode == "normal":
+            print(
+                "Normal latency stats: "
+                f"eligible_frames={latency_stats.eligible_frames}, "
+                f"model_refreshes={latency_stats.model_refreshes}, "
+                f"trajectory_reuse_frames={latency_stats.reuse_frames}, "
+                f"vlm_call_reduction_vs_per_frame_baseline="
+                f"{latency_stats.vlm_call_reduction * 100:.1f}%, "
+                f"total_model_time={latency_stats.total_model_time_sec:.2f}s"
+            )
 
     print("\nStopped.")
 
