@@ -94,7 +94,9 @@ Normal mode latency optimization:
 - On shutdown, compare `vlm_call_reduction_vs_per_frame_baseline` in the
   printed `Normal latency stats`; the target optimization gate is `>=30%`.
 - For repeatable benchmark runs, add `--max-frames N --no-video` to stop
-  automatically and remove MP4 encoding overhead.
+  automatically and remove MP4 encoding overhead. Add `--latency-stats-json`
+  to write machine-readable stats, then compare runs with
+  `python tools/compare_latency_runs.py baseline.json optimized.json`.
 
 Optional pygame UI modes:
 
@@ -104,7 +106,13 @@ python carla_alpamayo_closed_loop.py --mode normal --pygame-ui
 
 # Baseline for latency comparison.
 python carla_alpamayo_closed_loop.py --mode normal --pygame-ui \
-  --normal-inference-interval-frames 0 --max-frames 100 --no-video
+  --normal-inference-interval-frames 0 --max-frames 100 --no-video \
+  --latency-stats-json baseline.json
+
+# Optimized run and 30% gate check.
+python carla_alpamayo_closed_loop.py --mode normal --pygame-ui \
+  --max-frames 100 --no-video --latency-stats-json optimized.json
+python tools/compare_latency_runs.py baseline.json optimized.json --min-reduction 0.30
 
 # Navigation-controlled trajectory generation.
 python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused

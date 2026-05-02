@@ -47,3 +47,25 @@ class NormalModeLatencyStats:
         if self.eligible_frames <= 0:
             return 0.0
         return max(0.0, 1.0 - (self.model_refreshes / self.eligible_frames))
+
+    @property
+    def model_time_per_eligible_frame_sec(self) -> float:
+        if self.eligible_frames <= 0:
+            return 0.0
+        return self.total_model_time_sec / self.eligible_frames
+
+    def to_dict(self, *, interval_frames: int, mode: str = "normal") -> dict[str, float | int | str]:
+        """Return machine-readable metrics for latency benchmark comparison."""
+
+        return {
+            "mode": mode,
+            "normal_inference_interval_frames": int(interval_frames),
+            "eligible_frames": int(self.eligible_frames),
+            "model_refreshes": int(self.model_refreshes),
+            "trajectory_reuse_frames": int(self.reuse_frames),
+            "total_model_time_sec": float(self.total_model_time_sec),
+            "model_time_per_eligible_frame_sec": float(
+                self.model_time_per_eligible_frame_sec
+            ),
+            "vlm_call_reduction_vs_per_frame_baseline": float(self.vlm_call_reduction),
+        }
