@@ -202,3 +202,15 @@ def test_closed_loop_can_disable_auto_respawn(monkeypatch):
     args = closed_loop.parse_args()
 
     assert args.auto_respawn is False
+
+
+def test_closed_loop_accepts_control_debug(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--control-debug"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.control_debug is True

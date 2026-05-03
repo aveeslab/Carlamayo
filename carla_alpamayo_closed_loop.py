@@ -138,6 +138,11 @@ def parse_args():
         help="Write normal-mode latency stats to this JSON file on shutdown.",
     )
     parser.add_argument(
+        "--control-debug",
+        action="store_true",
+        help="Print raw, smoothed, and CARLA-applied control values for debugging.",
+    )
+    parser.add_argument(
         "--keep-generate-logits",
         dest="disable_unused_generate_logits",
         action="store_false",
@@ -242,6 +247,7 @@ def main():
     print(f"CARLA map: {args.carla_map}")
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
+    print(f"Control debug: {'ON' if args.control_debug else 'OFF'}")
     print(f"Video recording: {'OFF' if args.no_video else ('ON' if cfg.SAVE_VIDEO else 'OFF')}")
     if args.max_frames:
         print(f"Max frames: {args.max_frames}")
@@ -597,6 +603,7 @@ def main():
             frame_count += 1
 
             state = carla_if.get_ego_state()
+            last_applied_control = carla_if.get_applied_control()
             carla_if.update_history(state)
 
             images = carla_if.get_camera_images()
@@ -615,7 +622,7 @@ def main():
             latest_telemetry = {
                 "frame": frame_count,
                 "speed_kmh": state["speed"] * 3.6,
-                "steering": prev_control["steer"],
+                "steering": last_applied_control["steer"],
                 "inference_time": current_inference_time,
             }
             frame_buffer.append(images)
@@ -882,7 +889,7 @@ def main():
                     throttle = 0.0
 
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
-                carla_if.apply_control(steering, throttle, brake)
+                commanded_control = carla_if.apply_control(steering, throttle, brake)
 
                 if current_pred_xyz is not None:
                     cam_img = images[1]
@@ -894,7 +901,7 @@ def main():
                         current_inference_time,
                         current_cot,
                         state["speed"] * 3.6,
-                        steering,
+                        commanded_control["steer"],
                         navigation_text=nav_state.navigation_text,
                         navigation_weight=nav_state.navigation_weight,
                         paused=nav_state.paused,
@@ -907,7 +914,7 @@ def main():
                 latest_telemetry = {
                     "frame": frame_count,
                     "speed_kmh": state["speed"] * 3.6,
-                    "steering": steering,
+                    "steering": commanded_control["steer"],
                     "inference_time": current_inference_time,
                 }
                 if pygame_ui is not None:
@@ -915,8 +922,30 @@ def main():
 
                 print(
                     f"[Frame {frame_count}] Speed: {state['speed']*3.6:.1f} km/h, "
-                    f"Steer: {steering:.4f}, Throttle: {throttle:.3f}, Brake: {brake:.3f}"
+                    "Applied: "
+                    f"Steer {last_applied_control['steer']:.4f}, "
+                    f"Throttle {last_applied_control['throttle']:.3f}, "
+                    f"Brake {last_applied_control['brake']:.3f} | "
+                    "Next cmd: "
+                    f"Steer {commanded_control['steer']:.4f}, "
+                    f"Throttle {commanded_control['throttle']:.3f}, "
+                    f"Brake {commanded_control['brake']:.3f}"
                 )
+                if args.control_debug:
+                    print(
+                        "    Control debug: "
+                        f"raw=({steering_raw:.4f}, {throttle_raw:.3f}, {brake_raw:.3f}) "
+                        f"cmd=({steering:.4f}, {throttle:.3f}, {brake:.3f}) "
+                        "last_tick=("
+                        f"{last_applied_control['steer']:.4f}, "
+                        f"{last_applied_control['throttle']:.3f}, "
+                        f"{last_applied_control['brake']:.3f}) "
+                        f"flags(hand={last_applied_control['hand_brake']}, "
+                        f"rev={last_applied_control['reverse']}, "
+                        f"manual={last_applied_control['manual_gear_shift']}) "
+                        f"target_idx={_ctrl_debug.get('target_idx')} "
+                        f"target_speed={float(_ctrl_debug.get('target_speed_kmh', 0.0)):.2f}km/h"
+                    )
                 if current_trajectory_ts is not None and args.async_mode:
                     print(f"    Trajectory age: {time.time() - current_trajectory_ts:.2f}s")
                 if args.auto_respawn:
@@ -931,17 +960,29 @@ def main():
                         _auto_respawn(stuck_decision.reason)
             else:
                 if args.mode == "vqa":
-                    carla_if.apply_control(0.0, 0.0, 1.0)
+                    commanded_control = carla_if.apply_control(0.0, 0.0, 1.0)
                 else:
-                    carla_if.apply_control(0.0, 0.3, 0.0)
+                    commanded_control = carla_if.apply_control(0.0, 0.3, 0.0)
                 latest_telemetry = {
                     "frame": frame_count,
                     "speed_kmh": state["speed"] * 3.6,
-                    "steering": 0.0,
+                    "steering": last_applied_control["steer"],
                     "inference_time": current_inference_time,
                 }
                 if pygame_ui is not None:
                     pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
+                if args.control_debug:
+                    print(
+                        f"[Frame {frame_count}] No trajectory. "
+                        "Applied: "
+                        f"Steer {last_applied_control['steer']:.4f}, "
+                        f"Throttle {last_applied_control['throttle']:.3f}, "
+                        f"Brake {last_applied_control['brake']:.3f} | "
+                        "Next cmd: "
+                        f"Steer {commanded_control['steer']:.4f}, "
+                        f"Throttle {commanded_control['throttle']:.3f}, "
+                        f"Brake {commanded_control['brake']:.3f}"
+                    )
 
             if args.max_frames and frame_count >= args.max_frames:
                 print(f"\nReached --max-frames={args.max_frames}; stopping.")
