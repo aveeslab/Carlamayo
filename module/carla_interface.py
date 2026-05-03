@@ -188,8 +188,17 @@ class CARLAInterface:
         spawn_point = self._select_ego_spawn_point()
         print("Spawning ego vehicle...")
         self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
+        self._disable_ego_autopilot()
         print(f"Spawned ego vehicle at {spawn_point.location}")
         return self.ego_vehicle
+
+    def _disable_ego_autopilot(self):
+        if self.ego_vehicle is None:
+            return
+        try:
+            self.ego_vehicle.set_autopilot(False, self.tm_port)
+        except Exception:
+            pass
 
     def respawn_ego_vehicle(self):
         """Teleport the ego vehicle to a clear spawn point and reset ego-local state."""
@@ -199,10 +208,12 @@ class CARLAInterface:
 
         spawn_point = self._select_ego_spawn_point()
         print(f"Respawning ego vehicle at {spawn_point.location}")
+        self._disable_ego_autopilot()
         self.apply_control(0.0, 0.0, 1.0)
         self.ego_vehicle.set_target_velocity(carla.Vector3D())
         self.ego_vehicle.set_target_angular_velocity(carla.Vector3D())
         self.ego_vehicle.set_transform(spawn_point)
+        self._disable_ego_autopilot()
         self.ego_vehicle.set_target_velocity(carla.Vector3D())
         self.ego_vehicle.set_target_angular_velocity(carla.Vector3D())
         self.apply_control(0.0, 0.0, 1.0)
@@ -339,12 +350,33 @@ class CARLAInterface:
 
         return history_xyz, history_rot
 
+    @staticmethod
+    def _control_to_dict(control):
+        return {
+            "steer": float(getattr(control, "steer", 0.0)),
+            "throttle": float(getattr(control, "throttle", 0.0)),
+            "brake": float(getattr(control, "brake", 0.0)),
+            "hand_brake": bool(getattr(control, "hand_brake", False)),
+            "reverse": bool(getattr(control, "reverse", False)),
+            "manual_gear_shift": bool(getattr(control, "manual_gear_shift", False)),
+        }
+
+    def get_applied_control(self):
+        try:
+            return self._control_to_dict(self.ego_vehicle.get_control())
+        except Exception:
+            return self._control_to_dict(carla.VehicleControl())
+
     def apply_control(self, steering, throttle, brake):
         control = carla.VehicleControl()
         control.steer = float(steering)
         control.throttle = float(throttle)
         control.brake = float(brake)
+        control.hand_brake = False
+        control.reverse = False
+        control.manual_gear_shift = False
         self.ego_vehicle.apply_control(control)
+        return self._control_to_dict(control)
 
     def tick(self):
         self.world.tick()
