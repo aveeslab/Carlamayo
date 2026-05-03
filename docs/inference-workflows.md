@@ -102,6 +102,10 @@ Normal mode latency optimization:
   respawn, and repeated low-speed throttle deadlocks trigger after
   `--respawn-stuck-frames 40`. Use `--no-auto-respawn` to keep the previous
   behavior.
+- Closed-loop control tracks the raw Alpamayo trajectory. The PID target is
+  selected from the model output and is not projected onto CARLA map waypoints;
+  the video overlay shows the Alpamayo path in blue and the active PID target
+  in green.
 
 Optional pygame UI modes:
 

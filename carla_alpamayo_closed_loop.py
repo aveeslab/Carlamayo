@@ -319,6 +319,7 @@ def main():
         current_inference_time = 0.0
         frame_buffer = []
         current_trajectory_ts = None
+        current_control_target_xyz = None
         last_model_refresh_frame = None
         prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
 
@@ -343,7 +344,8 @@ def main():
         def _auto_respawn(reason):
             nonlocal current_trajectory, current_pred_xyz, current_pred_world
             nonlocal prev_selected_trajectory, current_selected_traj_idx, current_cot
-            nonlocal current_inference_time, current_trajectory_ts, last_model_refresh_frame
+            nonlocal current_inference_time, current_trajectory_ts, current_control_target_xyz
+            nonlocal last_model_refresh_frame
             nonlocal prev_control, pending_inference, pid_follower, respawn_count
             nonlocal respawn_revision
 
@@ -358,6 +360,7 @@ def main():
             current_cot = ""
             current_inference_time = 0.0
             current_trajectory_ts = None
+            current_control_target_xyz = None
             last_model_refresh_frame = None
             prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
             pending_inference = False
@@ -857,6 +860,7 @@ def main():
                     current_trajectory[:, :3],
                     float(state["speed"]),
                 )
+                current_control_target_xyz = _ctrl_debug.get("target_wp_local_alpamayo")
 
                 alpha = cfg.CONTROL_SMOOTH_ALPHA
                 steering = (1.0 - alpha) * prev_control["steer"] + alpha * steering_raw
@@ -885,6 +889,7 @@ def main():
                         navigation_text=nav_state.navigation_text,
                         navigation_weight=nav_state.navigation_weight,
                         paused=nav_state.paused,
+                        control_target_xyz=current_control_target_xyz,
                     )
                     latest_ui_frame = vis_frame
                     if save_video:

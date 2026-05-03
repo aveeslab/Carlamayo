@@ -56,7 +56,9 @@ then compare `--latency-stats-json` outputs with
 `tools/compare_latency_runs.py --metric vlm-generate`. Automatic ego respawn is
 enabled by default: collisions respawn immediately, and repeated low-speed
 throttle deadlocks respawn after `--respawn-stuck-frames 40`; add
-`--no-auto-respawn` to disable it.
+`--no-auto-respawn` to disable it. Closed-loop control follows the raw
+Alpamayo trajectory, not CARLA map-projected waypoints; the video overlay shows
+the Alpamayo path in blue and the active PID target in green.
 
 ```bash
 source a1_5_carla_venv/bin/activate
