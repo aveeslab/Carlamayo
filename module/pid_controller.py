@@ -151,6 +151,10 @@ class OfficialPIDFollower:
             )
         )
 
+    @staticmethod
+    def _scale_steering(steering):
+        return float(np.clip(float(steering) * cfg.STEERING_GAIN, -1.0, 1.0))
+
     def compute_control(self, vehicle_tf, wp_ego, speed_mps):
         wp_local = alpamayo_to_carla_local(wp_ego)
         wp_world = local_to_world(vehicle_tf, wp_local)
@@ -163,9 +167,12 @@ class OfficialPIDFollower:
                 "traj_extent": traj_extent,
             }
         control = self.pid.run_step(target_speed_kmh, target_wp)
+        steering = self._scale_steering(control.steer)
         debug = {
             "mode": "official_pid",
             "target_speed_kmh": target_speed_kmh,
+            "pid_steer": float(control.steer),
+            "steering_gain": float(cfg.STEERING_GAIN),
             "lookahead_m": lookahead_m,
             "target_idx": int(target_idx),
             "target_wp_xy": [
@@ -192,4 +199,4 @@ class OfficialPIDFollower:
             )[0].tolist(),
             "traj_extent": traj_extent,
         }
-        return float(control.steer), float(control.throttle), float(control.brake), debug
+        return steering, float(control.throttle), float(control.brake), debug
