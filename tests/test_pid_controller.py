@@ -64,3 +64,15 @@ def test_target_speed_estimate_keeps_dense_forward_path_moving():
     target_speed = OfficialPIDFollower._estimate_target_speed_kmh(wp_local)
 
     assert target_speed >= cfg.PID_TARGET_SPEED_MIN_KMH
+
+
+def test_steering_gain_reduces_pid_output():
+    scaled = OfficialPIDFollower._scale_steering(0.8)
+
+    assert scaled == cfg.STEERING_GAIN * 0.8
+    assert abs(scaled) < 0.8
+
+
+def test_steering_gain_preserves_sign_and_zero():
+    assert OfficialPIDFollower._scale_steering(-0.5) < 0.0
+    assert OfficialPIDFollower._scale_steering(0.0) == 0.0

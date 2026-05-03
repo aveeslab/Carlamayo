@@ -960,6 +960,8 @@ def main():
                         f"flags(hand={last_applied_control['hand_brake']}, "
                         f"rev={last_applied_control['reverse']}, "
                         f"manual={last_applied_control['manual_gear_shift']}) "
+                        f"pid_steer={float(_ctrl_debug.get('pid_steer', steering_raw)):.4f} "
+                        f"steer_gain={float(_ctrl_debug.get('steering_gain', 1.0)):.2f} "
                         f"target_idx={_ctrl_debug.get('target_idx')} "
                         f"target_speed={float(_ctrl_debug.get('target_speed_kmh', 0.0)):.2f}km/h"
                     )
