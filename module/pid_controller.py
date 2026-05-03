@@ -8,6 +8,7 @@ import carla
 import numpy as np
 
 from . import config as cfg
+from .trajectory_cache import world_to_alpamayo_local
 
 
 def _resolve_vehicle_pid_controller():
@@ -55,6 +56,13 @@ def local_to_world(vehicle_tf, wp_local):
         loc_w = vehicle_tf.transform(carla.Location(x=float(p[0]), y=float(p[1]), z=float(p[2])))
         wp_world.append([loc_w.x, loc_w.y, loc_w.z])
     return np.asarray(wp_world, dtype=np.float64)
+
+
+class _RawTargetWaypoint:
+    """Waypoint-like wrapper around an Alpamayo world-space target location."""
+
+    def __init__(self, location):
+        self.transform = carla.Transform(location)
 
 
 class OfficialPIDFollower:
@@ -107,7 +115,7 @@ class OfficialPIDFollower:
             y=float(wp_world[target_idx, 1]),
             z=float(wp_world[target_idx, 2]),
         )
-        target_wp = self.map.get_waypoint(loc, project_to_road=True, lane_type=carla.LaneType.Driving)
+        target_wp = _RawTargetWaypoint(loc)
         return target_wp, target_idx, lookahead_m
 
     def compute_control(self, vehicle_tf, wp_ego, speed_mps):
@@ -134,6 +142,24 @@ class OfficialPIDFollower:
             "lookahead_m": lookahead_m,
             "target_idx": int(target_idx),
             "target_wp_xy": [float(target_wp.transform.location.x), float(target_wp.transform.location.y)],
+            "target_wp_local_alpamayo": world_to_alpamayo_local(
+                np.asarray(
+                    [
+                        [
+                            float(target_wp.transform.location.x),
+                            float(target_wp.transform.location.y),
+                            float(target_wp.transform.location.z),
+                        ]
+                    ],
+                    dtype=np.float32,
+                ),
+                {
+                    "x": float(vehicle_tf.location.x),
+                    "y": float(vehicle_tf.location.y),
+                    "z": float(vehicle_tf.location.z),
+                    "yaw": float(vehicle_tf.rotation.yaw),
+                },
+            )[0].tolist(),
             "traj_extent": traj_extent,
         }
         return float(control.steer), float(control.throttle), float(control.brake), debug
