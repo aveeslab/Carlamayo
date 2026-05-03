@@ -150,11 +150,11 @@ def parse_args():
     parser.add_argument(
         "--vlm-image-pixels",
         type=int,
-        default=65536,
+        default=196608,
         help=(
             "Per-image min/max pixel budget passed to the Qwen-VL processor. "
-            "Default: 65536 for lower single-call VLM latency. Use 196608 for "
-            "the original Alpamayo image-token budget."
+            "Default: 196608 to preserve Alpamayo path quality. Use 65536 only "
+            "for an explicit low-latency experiment."
         ),
     )
     parser.add_argument(

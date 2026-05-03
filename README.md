@@ -49,10 +49,10 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 `--mode`. It defaults to 4-bit quantization, `Town03`, `device_map=auto`, and
 the MAGMA CUDA linalg backend for local GPU stability. In `normal` mode it
 profiles Alpamayo `vlm.generate()` time and, by default, disables returned
-generation logits that the trajectory path does not consume while using a
-smaller Qwen-VL image-token budget (`--vlm-image-pixels 65536`). Use
-`--keep-generate-logits --vlm-image-pixels 196608` for the original baseline,
-then compare `--latency-stats-json` outputs with
+generation logits that the trajectory path does not consume while preserving
+Alpamayo's original Qwen-VL image-token budget (`--vlm-image-pixels 196608`)
+for path quality. Use `--vlm-image-pixels 65536` only for explicit low-latency
+experiments, then compare `--latency-stats-json` outputs with
 `tools/compare_latency_runs.py --metric vlm-generate`. Automatic ego respawn is
 enabled by default: collisions respawn immediately, and repeated low-speed
 throttle deadlocks respawn after `--respawn-stuck-frames 40`; add

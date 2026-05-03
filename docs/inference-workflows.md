@@ -86,12 +86,15 @@ the Alpamayo action-space conversion path.
 Normal mode latency optimization:
 
 - Default normal mode keeps the original per-ready-frame refresh behavior and
-  optimizes the single-call `vlm.generate()` hot path by disabling returned VLM
-  logits that the trajectory rollout does not consume, plus a smaller Qwen-VL
-  image-token budget (`--vlm-image-pixels 65536`). Token sampling, generated
-  sequence handling, KV cache use, and diffusion parameters are unchanged.
-- Baseline run: add `--keep-generate-logits --vlm-image-pixels 196608` to
-  preserve Alpamayo's original returned-logits behavior and image-token budget.
+  preserves Alpamayo's original Qwen-VL image-token budget
+  (`--vlm-image-pixels 196608`) for path quality. It still optimizes the
+  single-call `vlm.generate()` hot path by disabling returned VLM logits that
+  the trajectory rollout does not consume. Token sampling, generated sequence
+  handling, KV cache use, and diffusion parameters are unchanged.
+- Low-latency experiment: add `--vlm-image-pixels 65536` only when you accept
+  possible path-quality loss from reduced visual tokens. Add
+  `--keep-generate-logits` to restore Alpamayo's original returned-logits
+  behavior too.
 - On shutdown, compare `avg_vlm_generate_time_sec` in the printed/written normal
   latency stats; the target optimization gate is `>=30%`.
 - For repeatable benchmark runs, add `--max-frames N --no-video` to stop
@@ -115,12 +118,13 @@ python carla_alpamayo_closed_loop.py --mode normal --pygame-ui
 
 # Baseline for latency comparison.
 python carla_alpamayo_closed_loop.py --mode normal --pygame-ui \
-  --keep-generate-logits --vlm-image-pixels 196608 --max-frames 100 --no-video \
+  --keep-generate-logits --max-frames 100 --no-video \
   --latency-stats-json baseline.json
 
-# Optimized run and 30% gate check.
+# Low-latency image-token experiment and 30% gate check.
 python carla_alpamayo_closed_loop.py --mode normal --pygame-ui \
-  --max-frames 100 --no-video --latency-stats-json optimized.json
+  --vlm-image-pixels 65536 --max-frames 100 --no-video \
+  --latency-stats-json optimized.json
 python tools/compare_latency_runs.py baseline.json optimized.json \
   --metric vlm-generate --min-reduction 0.30
 
