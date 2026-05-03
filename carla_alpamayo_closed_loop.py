@@ -15,6 +15,7 @@ from module import config as cfg
 from module.latency_control import NormalModeLatencyStats, should_refresh_normal_inference
 from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
+from module.respawn_control import RespawnMonitor
 from module.trajectory_cache import alpamayo_local_to_world, world_to_alpamayo_local
 from module.vlm_generate_optimization import VlmGenerateTiming
 from module.visualization import VideoRecorder, create_visualization_frame
@@ -175,6 +176,34 @@ def parse_args():
             'Default: "magma" to avoid cuSOLVER cholesky handle failures.'
         ),
     )
+    parser.add_argument(
+        "--no-auto-respawn",
+        dest="auto_respawn",
+        action="store_false",
+        default=True,
+        help="Disable automatic ego respawn after collisions or repeated stuck frames.",
+    )
+    parser.add_argument(
+        "--respawn-stuck-frames",
+        type=int,
+        default=cfg.RESPAWN_STUCK_FRAMES,
+        help=(
+            "Respawn after this many consecutive low-speed frames while throttle is commanded. "
+            "Set 0 to disable stuck respawn."
+        ),
+    )
+    parser.add_argument(
+        "--respawn-stuck-speed-kmh",
+        type=float,
+        default=cfg.RESPAWN_STUCK_SPEED_KMH,
+        help="Speed threshold for stuck respawn detection in km/h.",
+    )
+    parser.add_argument(
+        "--respawn-collision-cooldown-frames",
+        type=int,
+        default=cfg.RESPAWN_COLLISION_COOLDOWN_FRAMES,
+        help="Minimum frames between automatic respawns.",
+    )
     return parser.parse_args()
 
 
@@ -187,6 +216,12 @@ def main():
         raise ValueError("--max-frames must be non-negative")
     if args.vlm_image_pixels <= 0:
         raise ValueError("--vlm-image-pixels must be positive")
+    if args.respawn_stuck_frames < 0:
+        raise ValueError("--respawn-stuck-frames must be non-negative")
+    if args.respawn_stuck_speed_kmh < 0:
+        raise ValueError("--respawn-stuck-speed-kmh must be non-negative")
+    if args.respawn_collision_cooldown_frames < 0:
+        raise ValueError("--respawn-collision-cooldown-frames must be non-negative")
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -203,6 +238,14 @@ def main():
         print(f"Max frames: {args.max_frames}")
     if args.mode == "normal":
         print(f"Normal model refresh interval: {args.normal_inference_interval_frames} frames")
+    print(f"Auto respawn: {'ON' if args.auto_respawn else 'OFF'}")
+    if args.auto_respawn:
+        print(
+            "  collision cooldown="
+            f"{args.respawn_collision_cooldown_frames} frames, "
+            f"stuck={args.respawn_stuck_frames} frames "
+            f"@ <= {args.respawn_stuck_speed_kmh:.1f} km/h"
+        )
 
     nav_state = NavigationControlState(
         args.navigation_text,
@@ -233,6 +276,13 @@ def main():
     latest_telemetry = {}
     latency_stats = NormalModeLatencyStats()
     vlm_generate_timing = VlmGenerateTiming()
+    respawn_monitor = RespawnMonitor(
+        cooldown_frames=args.respawn_collision_cooldown_frames,
+        stuck_frames=args.respawn_stuck_frames,
+        stuck_speed_kmh=args.respawn_stuck_speed_kmh,
+    )
+    respawn_count = 0
+    respawn_reasons = []
     inference_request_q = None
     inference_result_q = None
     inference_stop = None
@@ -254,6 +304,8 @@ def main():
         carla_if.enable_synchronous_mode()
         carla_if.spawn_npcs(num_vehicles=cfg.NPC_VEHICLE_COUNT, num_walkers=cfg.NPC_WALKER_COUNT)
         carla_if.setup_cameras()
+        if args.auto_respawn:
+            carla_if.setup_collision_sensor()
         time.sleep(1.0)
 
         pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
@@ -272,6 +324,52 @@ def main():
 
         pending_inference = False
         last_inference_submit_ts = 0.0
+        respawn_revision = 0
+
+        def _clear_async_queues():
+            if inference_request_q is not None:
+                while True:
+                    try:
+                        inference_request_q.get_nowait()
+                    except queue.Empty:
+                        break
+            if inference_result_q is not None:
+                while True:
+                    try:
+                        inference_result_q.get_nowait()
+                    except queue.Empty:
+                        break
+
+        def _auto_respawn(reason):
+            nonlocal current_trajectory, current_pred_xyz, current_pred_world
+            nonlocal prev_selected_trajectory, current_selected_traj_idx, current_cot
+            nonlocal current_inference_time, current_trajectory_ts, last_model_refresh_frame
+            nonlocal prev_control, pending_inference, pid_follower, respawn_count
+            nonlocal respawn_revision
+
+            print(f"[Frame {frame_count}] Auto-respawn: {reason}")
+            carla_if.respawn_ego_vehicle()
+            pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
+            current_trajectory = None
+            current_pred_xyz = None
+            current_pred_world = None
+            prev_selected_trajectory = None
+            current_selected_traj_idx = 0
+            current_cot = ""
+            current_inference_time = 0.0
+            current_trajectory_ts = None
+            last_model_refresh_frame = None
+            prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
+            pending_inference = False
+            respawn_revision += 1
+            respawn_count += 1
+            respawn_reasons.append({"frame": int(frame_count), "reason": reason})
+            respawn_monitor.mark_respawn(
+                frame_count=frame_count,
+                collision_count=carla_if.get_collision_count(),
+            )
+            frame_buffer.clear()
+            _clear_async_queues()
 
         def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
             def _run_once(weight):
@@ -356,6 +454,7 @@ def main():
                     "navigation_weight": nav_state.navigation_weight,
                     "vqa_question": nav_state.vqa_question,
                     "prompt_revision": nav_state.revision,
+                    "respawn_revision": respawn_revision,
                 }
 
             def _inference_worker():
@@ -388,6 +487,7 @@ def main():
                                 "result_ts": time.time(),
                                 "vqa_question": req["vqa_question"],
                                 "prompt_revision": req["prompt_revision"],
+                                "respawn_revision": req["respawn_revision"],
                             }
                         else:
                             navigation_text = (
@@ -411,12 +511,14 @@ def main():
                                 "navigation_text": navigation_text,
                                 "navigation_weight": navigation_weight,
                                 "prompt_revision": req["prompt_revision"],
+                                "respawn_revision": req["respawn_revision"],
                             }
                     except Exception as e:
                         result = {
                             "frame_submitted": req_frame,
                             "error": str(e),
                             "result_ts": time.time(),
+                            "respawn_revision": req.get("respawn_revision"),
                         }
 
                     while True:
@@ -486,6 +588,16 @@ def main():
             carla_if.update_history(state)
 
             images = carla_if.get_camera_images()
+            if args.auto_respawn:
+                collision_decision = respawn_monitor.check_collision(
+                    frame_count=frame_count,
+                    collision_count=carla_if.get_collision_count(),
+                    last_collision_event=carla_if.get_last_collision_event(),
+                )
+                if collision_decision.should_respawn:
+                    _auto_respawn(collision_decision.reason)
+                    continue
+
             if len(images) > 1:
                 latest_ui_frame = images[1]
             latest_telemetry = {
@@ -523,7 +635,11 @@ def main():
                         last_refresh_frame=last_model_refresh_frame,
                         min_interval_frames=args.normal_inference_interval_frames,
                     )
-                    if frame_ready and not should_submit_inference and current_trajectory is not None:
+                    if (
+                        frame_ready
+                        and not should_submit_inference
+                        and current_trajectory is not None
+                    ):
                         latency_stats.record_reuse_frame()
                 else:
                     should_submit_inference = (
@@ -560,6 +676,14 @@ def main():
                         print(
                             f"[Frame {frame_count}] Discarded stale inference result for "
                             f"prompt revision {latest_result.get('prompt_revision')}"
+                        )
+                    elif (
+                        latest_result.get("respawn_revision", respawn_revision)
+                        != respawn_revision
+                    ):
+                        print(
+                            f"[Frame {frame_count}] Discarded stale inference result from "
+                            f"respawn revision {latest_result.get('respawn_revision')}"
                         )
                     elif "error" not in latest_result and latest_result.get("mode") == "vqa":
                         answer = latest_result.get("answer") or extract_answer_text(
@@ -681,7 +805,9 @@ def main():
                             history_xyz, history_rot = carla_if.get_history_in_local_frame()
                             model_data = prepare_model_input(images_array, history_xyz, history_rot)
 
-                        navigation_text = nav_state.navigation_text if args.mode == "navigation" else ""
+                        navigation_text = (
+                            nav_state.navigation_text if args.mode == "navigation" else ""
+                        )
                         navigation_weight = (
                             nav_state.navigation_weight if args.mode == "navigation" else 1.0
                         )
@@ -779,6 +905,16 @@ def main():
                 )
                 if current_trajectory_ts is not None and args.async_mode:
                     print(f"    Trajectory age: {time.time() - current_trajectory_ts:.2f}s")
+                if args.auto_respawn:
+                    stuck_decision = respawn_monitor.check_stuck(
+                        frame_count=frame_count,
+                        speed_kmh=state["speed"] * 3.6,
+                        throttle=throttle,
+                        brake=brake,
+                        has_trajectory=True,
+                    )
+                    if stuck_decision.should_respawn:
+                        _auto_respawn(stuck_decision.reason)
             else:
                 if args.mode == "vqa":
                     carla_if.apply_control(0.0, 0.0, 1.0)
@@ -826,6 +962,8 @@ def main():
             stats_dict["disable_unused_generate_logits"] = bool(
                 args.disable_unused_generate_logits
             )
+            stats_dict["respawn_count"] = int(respawn_count)
+            stats_dict["respawn_reasons"] = respawn_reasons
             print(
                 "Normal latency stats: "
                 f"eligible_frames={stats_dict['eligible_frames']}, "
@@ -834,7 +972,8 @@ def main():
                 f"vlm_call_reduction_vs_per_frame_baseline="
                 f"{stats_dict['vlm_call_reduction_vs_per_frame_baseline'] * 100:.1f}%, "
                 f"total_model_time={stats_dict['total_model_time_sec']:.2f}s, "
-                f"avg_vlm_generate_time={stats_dict['avg_vlm_generate_time_sec']:.2f}s"
+                f"avg_vlm_generate_time={stats_dict['avg_vlm_generate_time_sec']:.2f}s, "
+                f"respawns={respawn_count}"
             )
             if args.latency_stats_json:
                 stats_path = Path(args.latency_stats_json)

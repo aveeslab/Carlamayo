@@ -98,6 +98,10 @@ Normal mode latency optimization:
   automatically and remove MP4 encoding overhead. Add `--latency-stats-json`
   to write machine-readable stats, then compare runs with
   `python tools/compare_latency_runs.py baseline.json optimized.json`.
+- Automatic ego respawn is on by default. A collision sensor triggers immediate
+  respawn, and repeated low-speed throttle deadlocks trigger after
+  `--respawn-stuck-frames 40`. Use `--no-auto-respawn` to keep the previous
+  behavior.
 
 Optional pygame UI modes:
 

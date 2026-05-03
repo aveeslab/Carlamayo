@@ -33,6 +33,7 @@ class CARLAInterface:
         self.ego_vehicle = None
         self.sensors = {}
         self.sensor_queues = {}
+        self.collision_events = []
         self.history_buffer = []
         self.npc_vehicle_ids = []
         self.npc_walker_ids = []
@@ -156,18 +157,59 @@ class CARLAInterface:
 
         print(f"Spawned NPC walkers: {len(self.npc_walker_ids)}/{num_walkers}")
 
-    def spawn_ego_vehicle(self):
+    def _is_spawn_point_clear(self, spawn_point, min_distance=8.0):
+        if self.world is None:
+            return True
+        spawn_location = spawn_point.location
+        for actor in self.world.get_actors().filter("vehicle.*"):
+            if self.ego_vehicle is not None and actor.id == self.ego_vehicle.id:
+                continue
+            if actor.get_location().distance(spawn_location) < min_distance:
+                return False
+        return True
+
+    def _select_ego_spawn_point(self):
         print("Selecting spawn point...")
+        spawn_points = self.world.get_map().get_spawn_points()
+        shuffled_points = list(spawn_points)
+        random.shuffle(shuffled_points)
+        for spawn_point in shuffled_points:
+            if self._is_spawn_point_clear(spawn_point):
+                print("Selected clear random spawn point.")
+                return spawn_point
+        spawn_point = random.choice(spawn_points)
+        print("No clear spawn point found; selected random spawn point.")
+        return spawn_point
+
+    def spawn_ego_vehicle(self):
         bp_lib = self.world.get_blueprint_library()
         vehicle_bp = bp_lib.find("vehicle.tesla.model3")
         vehicle_bp.set_attribute("role_name", "hero")
-        spawn_points = self.world.get_map().get_spawn_points()
-        spawn_point = random.choice(spawn_points)
-        print("Selected random spawn point.")
+        spawn_point = self._select_ego_spawn_point()
         print("Spawning ego vehicle...")
         self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)
         print(f"Spawned ego vehicle at {spawn_point.location}")
         return self.ego_vehicle
+
+    def respawn_ego_vehicle(self):
+        """Teleport the ego vehicle to a clear spawn point and reset ego-local state."""
+
+        if self.ego_vehicle is None:
+            return self.spawn_ego_vehicle()
+
+        spawn_point = self._select_ego_spawn_point()
+        print(f"Respawning ego vehicle at {spawn_point.location}")
+        self.apply_control(0.0, 0.0, 1.0)
+        self.ego_vehicle.set_target_velocity(carla.Vector3D())
+        self.ego_vehicle.set_target_angular_velocity(carla.Vector3D())
+        self.ego_vehicle.set_transform(spawn_point)
+        self.ego_vehicle.set_target_velocity(carla.Vector3D())
+        self.ego_vehicle.set_target_angular_velocity(carla.Vector3D())
+        self.apply_control(0.0, 0.0, 1.0)
+        self.history_buffer.clear()
+        self.reset_collision_history()
+        self.flush_camera_queues()
+        return spawn_point
 
     def setup_cameras(self):
         print("Setting up cameras...")
@@ -192,6 +234,50 @@ class CARLAInterface:
             time.sleep(0.2)
 
         print(f"Setup {len(self.sensors)} cameras ({cfg.IMG_WIDTH}x{cfg.IMG_HEIGHT})")
+
+    def setup_collision_sensor(self):
+        print("Setting up collision sensor...")
+        bp_lib = self.world.get_blueprint_library()
+        collision_bp = bp_lib.find("sensor.other.collision")
+        sensor = self.world.spawn_actor(collision_bp, carla.Transform(), attach_to=self.ego_vehicle)
+        sensor.listen(self._collision_callback)
+        self.sensors["collision"] = sensor
+
+    def _collision_callback(self, event):
+        impulse = event.normal_impulse
+        intensity = math.sqrt(impulse.x**2 + impulse.y**2 + impulse.z**2)
+        other_actor = getattr(event, "other_actor", None)
+        collision_event = {
+            "frame": int(getattr(event, "frame", 0)),
+            "intensity": float(intensity),
+            "other_actor": getattr(other_actor, "type_id", "unknown"),
+            "other_actor_id": int(getattr(other_actor, "id", 0)),
+        }
+        self.collision_events.append(collision_event)
+        if len(self.collision_events) > 20:
+            self.collision_events = self.collision_events[-20:]
+        print(
+            "Collision detected: "
+            f"actor={collision_event['other_actor']} "
+            f"impulse={collision_event['intensity']:.1f}"
+        )
+
+    def get_collision_count(self):
+        return len(self.collision_events)
+
+    def get_last_collision_event(self):
+        return self.collision_events[-1] if self.collision_events else None
+
+    def reset_collision_history(self):
+        self.collision_events.clear()
+
+    def flush_camera_queues(self):
+        for sensor_queue in self.sensor_queues.values():
+            while True:
+                try:
+                    sensor_queue.get_nowait()
+                except queue.Empty:
+                    break
 
     def _camera_callback(self, image, name):
         if not self.sensor_queues[name].full():

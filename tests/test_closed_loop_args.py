@@ -168,3 +168,25 @@ def test_capture_initial_ui_frame_ticks_and_returns_front_wide_camera():
     assert np.array_equal(ui_frame, frame1)
     assert telemetry["frame"] == 5
     assert telemetry["speed_kmh"] == 7.2
+
+
+def test_closed_loop_enables_auto_respawn_by_default(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.auto_respawn is True
+    assert args.respawn_stuck_frames == 40
+    assert args.respawn_collision_cooldown_frames == 30
+
+
+def test_closed_loop_can_disable_auto_respawn(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--no-auto-respawn"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.auto_respawn is False

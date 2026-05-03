@@ -53,7 +53,10 @@ generation logits that the trajectory path does not consume while using a
 smaller Qwen-VL image-token budget (`--vlm-image-pixels 65536`). Use
 `--keep-generate-logits --vlm-image-pixels 196608` for the original baseline,
 then compare `--latency-stats-json` outputs with
-`tools/compare_latency_runs.py --metric vlm-generate`.
+`tools/compare_latency_runs.py --metric vlm-generate`. Automatic ego respawn is
+enabled by default: collisions respawn immediately, and repeated low-speed
+throttle deadlocks respawn after `--respawn-stuck-frames 40`; add
+`--no-auto-respawn` to disable it.
 
 ```bash
 source a1_5_carla_venv/bin/activate
