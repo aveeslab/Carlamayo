@@ -23,14 +23,17 @@ From the repository root:
 
 ```bash
 source a1_5_carla_venv/bin/activate
-python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused
+python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui
 ```
 
 Closed-loop loading defaults to full precision. On lower-VRAM machines, add `--quantization`:
 
 ```bash
-python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused --quantization
+python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --quantization
 ```
+
+The pygame UI starts paused automatically so you can enter the first navigation prompt
+before the CARLA loop begins driving.
 
 ## Enter a Navigation Prompt
 
@@ -73,6 +76,7 @@ python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --quantizatio
 
 # Exact returned-logits baseline for debugging memory changes.
 python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --keep-generate-logits
+
 ```
 
 ## Output

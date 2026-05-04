@@ -1,14 +1,27 @@
 import sys
 
+import pytest
+
 import carla_alpamayo_closed_loop as closed_loop
 
 
-def test_closed_loop_defaults_to_town03(monkeypatch):
+def test_closed_loop_does_not_expose_carla_map_option(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
 
     args = closed_loop.parse_args()
 
-    assert args.carla_map == "Town03"
+    assert not hasattr(args, "carla_map")
+
+
+def test_closed_loop_rejects_carla_map_option(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--carla-map", "Town05"],
+    )
+
+    with pytest.raises(SystemExit):
+        closed_loop.parse_args()
 
 
 def test_closed_loop_defaults_to_auto_device_map(monkeypatch):
@@ -35,6 +48,26 @@ def test_closed_loop_defaults_to_normal_mode(monkeypatch):
     assert args.mode == "normal"
 
 
+def test_closed_loop_does_not_expose_auto_respawn_toggle(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert not hasattr(args, "auto_respawn")
+    assert not hasattr(args, "respawn_collision_cooldown_frames")
+
+
+def test_closed_loop_rejects_auto_respawn_disable_option(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--no-auto-respawn"],
+    )
+
+    with pytest.raises(SystemExit):
+        closed_loop.parse_args()
+
+
 def test_closed_loop_defaults_to_full_precision_model(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
 
@@ -55,16 +88,15 @@ def test_closed_loop_quantization_flag_enables_4bit_model(monkeypatch):
     assert args.quantization is True
 
 
-def test_closed_loop_no_quantization_flag_keeps_full_precision_model(monkeypatch):
+def test_closed_loop_rejects_no_quantization_flag(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
         ["carla_alpamayo_closed_loop.py", "--no-quantization"],
     )
 
-    args = closed_loop.parse_args()
-
-    assert args.quantization is False
+    with pytest.raises(SystemExit):
+        closed_loop.parse_args()
 
 
 def test_closed_loop_disables_unused_generate_logits_by_default(monkeypatch):
@@ -87,24 +119,56 @@ def test_closed_loop_can_keep_generate_logits_for_baseline(monkeypatch):
     assert args.disable_unused_generate_logits is False
 
 
-def test_closed_loop_defaults_vlm_image_pixels_to_quality_baseline(monkeypatch):
+def test_closed_loop_does_not_expose_vlm_image_pixels_option(monkeypatch):
     monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
 
     args = closed_loop.parse_args()
 
-    assert args.vlm_image_pixels == 196608
+    assert not hasattr(args, "vlm_image_pixels")
 
 
-def test_closed_loop_accepts_low_latency_vlm_image_pixels(monkeypatch):
+def test_closed_loop_rejects_vlm_image_pixels_option(monkeypatch):
     monkeypatch.setattr(
         sys,
         "argv",
         ["carla_alpamayo_closed_loop.py", "--vlm-image-pixels", "65536"],
     )
 
+    with pytest.raises(SystemExit):
+        closed_loop.parse_args()
+
+
+def test_closed_loop_pygame_ui_starts_paused(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--pygame-ui"],
+    )
+
     args = closed_loop.parse_args()
 
-    assert args.vlm_image_pixels == 65536
+    assert args.pygame_ui is True
+    assert args.start_paused is True
+
+
+def test_closed_loop_without_pygame_ui_does_not_start_paused(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.pygame_ui is False
+    assert args.start_paused is False
+
+
+def test_closed_loop_rejects_start_paused_option(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--start-paused"],
+    )
+
+    with pytest.raises(SystemExit):
+        closed_loop.parse_args()
 
 
 def test_closed_loop_accepts_vqa_mode_and_initial_question(monkeypatch):

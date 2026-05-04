@@ -12,6 +12,7 @@ import torch
 from module import config as cfg
 from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
+from module.respawn_control import RespawnMonitor
 from module.vlm_generate_optimization import VlmGenerateTiming
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.carla_interface import CARLAInterface
@@ -63,12 +64,6 @@ def parse_args():
         help="Use 4-bit quantized model instead of the default full-precision model.",
     )
     parser.add_argument(
-        "--no-quantization",
-        dest="quantization",
-        action="store_false",
-        help="Use the default full-precision model.",
-    )
-    parser.add_argument(
         "--async",
         dest="async_mode",
         action="store_true",
@@ -113,26 +108,6 @@ def parse_args():
         ),
     )
     parser.add_argument(
-        "--vlm-image-pixels",
-        type=int,
-        default=196608,
-        help=(
-            "Per-image min/max pixel budget passed to the Qwen-VL processor. "
-            "Default: 196608 to preserve Alpamayo path quality. Use 65536 only "
-            "for an explicit low-latency or lower-memory experiment."
-        ),
-    )
-    parser.add_argument(
-        "--start-paused",
-        action="store_true",
-        help="Start the pygame UI paused so navigation text can be entered before the first tick.",
-    )
-    parser.add_argument(
-        "--carla-map",
-        default=cfg.CARLA_MAP,
-        help=f"CARLA map to load before spawning actors. Default: {cfg.CARLA_MAP}.",
-    )
-    parser.add_argument(
         "--device-map",
         default="auto",
         help='Model device_map passed to from_pretrained. Default: "auto".',
@@ -146,14 +121,14 @@ def parse_args():
             'Default: "magma" to avoid cuSOLVER cholesky handle failures.'
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.start_paused = bool(args.pygame_ui)
+    return args
 
 
 def main():
     args = parse_args()
     inference_interval_sec = 1.0
-    if args.vlm_image_pixels <= 0:
-        raise ValueError("--vlm-image-pixels must be positive")
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -162,9 +137,10 @@ def main():
     print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
     print(f"Inference mode: {args.mode}")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
-    print(f"CARLA map: {args.carla_map}")
+    print(f"CARLA map: {cfg.CARLA_MAP}")
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
+    print("Auto respawn: ON after collisions")
 
     nav_state = NavigationControlState(
         args.navigation_text,
@@ -204,11 +180,12 @@ def main():
 
     try:
         carla_if.connect()
-        carla_if.load_map(args.carla_map)
+        carla_if.load_map(cfg.CARLA_MAP)
         carla_if.spawn_ego_vehicle()
         carla_if.enable_synchronous_mode()
         carla_if.spawn_npcs(num_vehicles=cfg.NPC_VEHICLE_COUNT, num_walkers=cfg.NPC_WALKER_COUNT)
         carla_if.setup_cameras()
+        carla_if.setup_collision_sensor()
         time.sleep(1.0)
 
         pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
@@ -220,16 +197,58 @@ def main():
         current_cot = ""
         current_inference_time = 0.0
         vlm_generate_timing = VlmGenerateTiming()
+        respawn_monitor = RespawnMonitor(
+            cooldown_frames=cfg.RESPAWN_COLLISION_COOLDOWN_FRAMES
+        )
         frame_buffer = []
         current_trajectory_ts = None
         prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
 
         pending_inference = False
         last_inference_submit_ts = 0.0
+        respawn_revision = 0
         inference_request_q = None
         inference_result_q = None
         inference_stop = None
         worker_thread = None
+
+        def _clear_async_queues():
+            for maybe_queue in (inference_request_q, inference_result_q):
+                if maybe_queue is None:
+                    continue
+                while True:
+                    try:
+                        maybe_queue.get_nowait()
+                    except queue.Empty:
+                        break
+
+        def _auto_respawn(reason):
+            nonlocal current_trajectory, current_pred_xyz, prev_selected_trajectory
+            nonlocal current_selected_traj_idx, current_cot, current_inference_time
+            nonlocal current_trajectory_ts, prev_control, pending_inference, pid_follower
+            nonlocal respawn_revision, last_vqa_submitted_revision, last_vqa_completed_revision
+
+            print(f"[Frame {frame_count}] Auto-respawn: {reason}")
+            carla_if.respawn_ego_vehicle()
+            pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
+            current_trajectory = None
+            current_pred_xyz = None
+            prev_selected_trajectory = None
+            current_selected_traj_idx = 0
+            current_cot = ""
+            current_inference_time = 0.0
+            current_trajectory_ts = None
+            prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
+            pending_inference = False
+            respawn_revision += 1
+            last_vqa_submitted_revision = None
+            last_vqa_completed_revision = None
+            respawn_monitor.mark_respawn(
+                frame_count=frame_count,
+                collision_count=carla_if.get_collision_count(),
+            )
+            frame_buffer.clear()
+            _clear_async_queues()
 
         def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
             def _run_once(weight):
@@ -241,7 +260,7 @@ def main():
                     navigation_weight=weight,
                     vlm_generate_timing=vlm_generate_timing,
                     disable_unused_generate_logits=args.disable_unused_generate_logits,
-                    vlm_image_pixels=args.vlm_image_pixels,
+                    vlm_image_pixels=cfg.VLM_IMAGE_PIXELS,
                 )
 
             try:
@@ -313,6 +332,7 @@ def main():
                     "navigation_weight": nav_state.navigation_weight,
                     "vqa_question": nav_state.vqa_question,
                     "prompt_revision": nav_state.revision,
+                    "respawn_revision": respawn_revision,
                 }
 
             def _inference_worker():
@@ -345,6 +365,7 @@ def main():
                                 "result_ts": time.time(),
                                 "vqa_question": req["vqa_question"],
                                 "prompt_revision": req["prompt_revision"],
+                                "respawn_revision": req["respawn_revision"],
                             }
                         else:
                             navigation_text = (
@@ -368,12 +389,14 @@ def main():
                                 "navigation_text": navigation_text,
                                 "navigation_weight": navigation_weight,
                                 "prompt_revision": req["prompt_revision"],
+                                "respawn_revision": req["respawn_revision"],
                             }
                     except Exception as e:
                         result = {
                             "frame_submitted": req_frame,
                             "error": str(e),
                             "result_ts": time.time(),
+                            "respawn_revision": req.get("respawn_revision"),
                         }
 
                     while True:
@@ -441,6 +464,15 @@ def main():
             state = carla_if.get_ego_state()
             carla_if.update_history(state)
 
+            collision_decision = respawn_monitor.check_collision(
+                frame_count=frame_count,
+                collision_count=carla_if.get_collision_count(),
+                last_collision_event=carla_if.get_last_collision_event(),
+            )
+            if collision_decision.should_respawn:
+                _auto_respawn(collision_decision.reason)
+                continue
+
             images = carla_if.get_camera_images()
             if len(images) > 1:
                 latest_ui_frame = images[1]
@@ -499,6 +531,14 @@ def main():
                         print(
                             f"[Frame {frame_count}] Discarded stale inference result for "
                             f"prompt revision {latest_result.get('prompt_revision')}"
+                        )
+                    elif (
+                        latest_result.get("respawn_revision", respawn_revision)
+                        != respawn_revision
+                    ):
+                        print(
+                            f"[Frame {frame_count}] Discarded stale inference result from "
+                            f"respawn revision {latest_result.get('respawn_revision')}"
                         )
                     elif "error" not in latest_result and latest_result.get("mode") == "vqa":
                         answer = latest_result.get("answer") or extract_answer_text(

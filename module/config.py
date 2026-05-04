@@ -43,6 +43,12 @@ THROTTLE_MAX = 0.35
 BRAKE_MAX = 1.0
 CONTROL_SMOOTH_ALPHA = 0.25
 
+# Auto-respawn after collision.
+RESPAWN_COLLISION_COOLDOWN_FRAMES = 10
+
+# Keep Alpamayo's original Qwen-VL image-token budget fixed from config.
+VLM_IMAGE_PIXELS = 196608
+
 # Official PID follower config
 PID_LOOKAHEAD_MIN_M = 4.0
 PID_LOOKAHEAD_MAX_M = 12.0

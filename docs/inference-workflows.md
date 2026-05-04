@@ -68,6 +68,9 @@ or edit `module/config.py`:
 CARLA_AGENT_ROOT = "~/carla"
 ```
 
+The CARLA town/map is configured in `module/config.py` with `CARLA_MAP`; the
+closed-loop script does not expose a separate map CLI option.
+
 Run closed-loop inference from the repository root:
 
 ```bash
@@ -83,11 +86,11 @@ The closed-loop script also defaults to `--cuda-linalg-library magma`; this
 avoids a cuSOLVER `torch.linalg.cholesky` initialization failure observed in
 the Alpamayo action-space conversion path.
 Normal mode also disables unused returned VLM logits by default to reduce CUDA
-memory without changing sampling, diffusion settings, or the original
-`--vlm-image-pixels 196608` image-token budget. Use `--keep-generate-logits` for
-the exact original returned-logits baseline. If a machine still runs out of
-VRAM, `--vlm-image-pixels 65536` is available as an explicit lower-memory
-experiment, but it may reduce path quality.
+memory without changing sampling, diffusion settings, or the image-token budget
+set in `module/config.py`. Use `--keep-generate-logits` for the exact original
+returned-logits baseline.
+Collision auto-respawn is always enabled so long closed-loop runs restart the
+ego vehicle after a crash.
 
 Optional pygame UI modes:
 
@@ -95,6 +98,9 @@ Optional pygame UI modes:
 # Normal closed-loop trajectory control with camera UI.
 python carla_alpamayo_closed_loop.py --mode normal --pygame-ui
 ```
+
+When `--pygame-ui` is enabled, the loop starts paused automatically so you can
+enter navigation or VQA text before the first active tick.
 
 Mode-specific usage guides:
 
