@@ -24,22 +24,13 @@
 
 ## Installation
 
-Clone with submodules, or initialize submodules after cloning:
-
-```bash
-git clone --recurse-submodules https://github.com/aveeslab/Alpamayo-CARLA.git
-cd Alpamayo-CARLA
-# If the repo was cloned without --recurse-submodules:
-git submodule update --init --recursive
-```
-
-Environment setup has been moved to a separate document:
+Environment setup by following document:
 
 - [Environment Setup](docs/environment-setup.md)
 
 ## Running Inference
 
-Data collection, open-loop inference, and closed-loop inference instructions have been moved to a separate document:
+Data collection, open-loop inference, and closed-loop inference by following document:
 
 - [Data Collection and Inference](docs/inference-workflows.md)
 
