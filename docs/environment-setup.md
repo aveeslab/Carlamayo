@@ -41,8 +41,10 @@ Use this environment for CARLA and data collection.
 mkdir -p ~/carla && cd ~/carla
 wget https://tiny.carla.org/carla-0-9-16-linux
 tar -xvzf carla-0-9-16-linux
-./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
+./CarlaUE4.sh -RenderOffScreen
 ```
+
+> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 If your CARLA archive extracts into a nested package directory, move or symlink the CARLA root so that `~/carla` contains `CarlaUE4.sh` and `PythonAPI/`.
 

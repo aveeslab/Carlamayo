@@ -8,8 +8,10 @@ Start CARLA before launching the integration script:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
+./CarlaUE4.sh -RenderOffScreen
 ```
+
+> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 Set the CARLA PythonAPI root if it is not already configured:
 

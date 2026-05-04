@@ -8,8 +8,10 @@ Start CARLA first:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
+./CarlaUE4.sh -RenderOffScreen
 ```
+
+> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 Then run data collection from the repository root:
 
@@ -53,8 +55,10 @@ Before running, make sure CARLA is running:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
+./CarlaUE4.sh -RenderOffScreen
 ```
+
+> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 Set the CARLA PythonAPI path if needed:
 
