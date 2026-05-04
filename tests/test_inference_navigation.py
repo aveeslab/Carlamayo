@@ -108,6 +108,28 @@ def test_run_inference_uses_cfg_nav_when_navigation_weight_is_not_one(monkeypatc
     }
 
 
+def test_run_inference_passes_vlm_image_pixel_cap_to_processor(monkeypatch):
+    _patch_helper(monkeypatch)
+    model = FakeModel()
+    processor = FakeProcessor()
+    data = {
+        "image_frames": FakeFrames(),
+        "ego_history_xyz": "history-xyz",
+        "ego_history_rot": "history-rot",
+    }
+
+    inference.run_inference(
+        model,
+        processor,
+        data,
+        vlm_image_pixels=196608,
+    )
+
+    tokenized_data = model.normal_kwargs["data"]["tokenized_data"]
+    assert tokenized_data["kwargs"]["min_pixels"] == 196608
+    assert tokenized_data["kwargs"]["max_pixels"] == 196608
+
+
 def test_run_vqa_passes_question_to_vqa_prompt(monkeypatch):
     seen = {}
 

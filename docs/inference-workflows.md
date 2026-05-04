@@ -82,6 +82,12 @@ weights across available devices instead of forcing all weights onto `cuda:0`.
 The closed-loop script also defaults to `--cuda-linalg-library magma`; this
 avoids a cuSOLVER `torch.linalg.cholesky` initialization failure observed in
 the Alpamayo action-space conversion path.
+Normal mode also disables unused returned VLM logits by default to reduce CUDA
+memory without changing sampling, diffusion settings, or the original
+`--vlm-image-pixels 196608` image-token budget. Use `--keep-generate-logits` for
+the exact original returned-logits baseline. If a machine still runs out of
+VRAM, `--vlm-image-pixels 65536` is available as an explicit lower-memory
+experiment, but it may reduce path quality.
 
 Optional pygame UI modes:
 

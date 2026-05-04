@@ -35,6 +35,46 @@ def test_closed_loop_defaults_to_normal_mode(monkeypatch):
     assert args.mode == "normal"
 
 
+def test_closed_loop_disables_unused_generate_logits_by_default(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.disable_unused_generate_logits is True
+
+
+def test_closed_loop_can_keep_generate_logits_for_baseline(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--keep-generate-logits"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.disable_unused_generate_logits is False
+
+
+def test_closed_loop_defaults_vlm_image_pixels_to_quality_baseline(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["carla_alpamayo_closed_loop.py"])
+
+    args = closed_loop.parse_args()
+
+    assert args.vlm_image_pixels == 196608
+
+
+def test_closed_loop_accepts_low_latency_vlm_image_pixels(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["carla_alpamayo_closed_loop.py", "--vlm-image-pixels", "65536"],
+    )
+
+    args = closed_loop.parse_args()
+
+    assert args.vlm_image_pixels == 65536
+
+
 def test_closed_loop_accepts_vqa_mode_and_initial_question(monkeypatch):
     monkeypatch.setattr(
         sys,

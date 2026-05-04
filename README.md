@@ -47,7 +47,12 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 
 The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 `--mode`. It defaults to 4-bit quantization, `Town03`, `device_map=auto`, and
-the MAGMA CUDA linalg backend for local GPU stability.
+the MAGMA CUDA linalg backend for local GPU stability. Normal mode disables
+unused returned VLM logits by default to reduce CUDA memory while preserving
+Alpamayo's original image-token budget (`--vlm-image-pixels 196608`). Add
+`--keep-generate-logits` for the exact original returned-logits baseline, or use
+`--vlm-image-pixels 65536` only as an explicit lower-memory experiment that may
+reduce path quality.
 
 ```bash
 source a1_5_carla_venv/bin/activate

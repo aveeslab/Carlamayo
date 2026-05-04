@@ -12,6 +12,7 @@ import torch
 from module import config as cfg
 from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
+from module.vlm_generate_optimization import VlmGenerateTiming
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.carla_interface import CARLAInterface
 from module.inference import (
@@ -101,6 +102,27 @@ def parse_args():
         help='Initial VQA question for --mode vqa, e.g. "Describe the scene.".',
     )
     parser.add_argument(
+        "--keep-generate-logits",
+        dest="disable_unused_generate_logits",
+        action="store_false",
+        default=True,
+        help=(
+            "Keep Alpamayo VLM returned logits during trajectory generation. "
+            "Default disables these unused returned logits to reduce CUDA memory "
+            "without changing image tokens or sampling."
+        ),
+    )
+    parser.add_argument(
+        "--vlm-image-pixels",
+        type=int,
+        default=196608,
+        help=(
+            "Per-image min/max pixel budget passed to the Qwen-VL processor. "
+            "Default: 196608 to preserve Alpamayo path quality. Use 65536 only "
+            "for an explicit low-latency or lower-memory experiment."
+        ),
+    )
+    parser.add_argument(
         "--start-paused",
         action="store_true",
         help="Start the pygame UI paused so navigation text can be entered before the first tick.",
@@ -130,6 +152,8 @@ def parse_args():
 def main():
     args = parse_args()
     inference_interval_sec = 1.0
+    if args.vlm_image_pixels <= 0:
+        raise ValueError("--vlm-image-pixels must be positive")
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
@@ -195,6 +219,7 @@ def main():
         current_selected_traj_idx = 0
         current_cot = ""
         current_inference_time = 0.0
+        vlm_generate_timing = VlmGenerateTiming()
         frame_buffer = []
         current_trajectory_ts = None
         prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
@@ -214,6 +239,9 @@ def main():
                     model_data,
                     navigation_text=navigation_text,
                     navigation_weight=weight,
+                    vlm_generate_timing=vlm_generate_timing,
+                    disable_unused_generate_logits=args.disable_unused_generate_logits,
+                    vlm_image_pixels=args.vlm_image_pixels,
                 )
 
             try:
