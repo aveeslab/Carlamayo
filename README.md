@@ -46,26 +46,10 @@ Data collection, open-loop inference, and closed-loop inference instructions hav
 ### Closed-Loop UI Modes
 
 The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
-`--mode`. It defaults to full-precision model loading, `Town03`,
-`device_map=auto`, and the MAGMA CUDA linalg backend for local GPU stability.
-Add `--quantization` to use the 4-bit model path. Normal mode disables
-unused returned VLM logits by default to reduce CUDA memory while preserving
-Alpamayo's original image-token budget (`--vlm-image-pixels 196608`). Add
-`--keep-generate-logits` for the exact original returned-logits baseline, or use
-`--vlm-image-pixels 65536` only as an explicit lower-memory experiment that may
-reduce path quality.
+`--mode`. See the mode-specific usage guides:
 
-```bash
-source a1_5_carla_venv/bin/activate
-export CARLA_ROOT=~/carla
-python carla_alpamayo_closed_loop.py --mode navigation --pygame-ui --start-paused
-```
-
-In `navigation` mode, type `Turn right in 30m | 1.0`, then press `Enter`. In
-`vqa` mode, run `python carla_alpamayo_closed_loop.py --mode vqa --pygame-ui
---start-paused`, type a driving-scene question, and press `Enter` to generate
-an answer using Alpamayo VQA. Use `Ctrl+P` to pause/resume and `Esc` to quit.
-Plain spaces and `p` characters are accepted in the text input.
+- [Navigation Mode](docs/navigation-mode.md)
+- [VQA Mode](docs/vqa-mode.md)
 
 ## Project Structure
 
@@ -92,7 +76,9 @@ Plain spaces and `p` characters are accepted in the text input.
 │   └── alpamayo1.5/            # NVIDIA Alpamayo 1.5 git submodule
 ├── docs/
 │   ├── environment-setup.md
-│   └── inference-workflows.md
+│   ├── inference-workflows.md
+│   ├── navigation-mode.md
+│   └── vqa-mode.md
 ├── requirements-carla.txt
 ├── requirements-alpamayo.txt
 ├── LICENSE
