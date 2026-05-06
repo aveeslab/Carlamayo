@@ -1,17 +1,23 @@
 # NOTICE
 
+## Repository License
+
+This repository's CARLA integration code and documentation are licensed under
+the Apache License 2.0. See `LICENSE` for details.
+
 ## Third-Party Licenses
 
 This project includes code from NVIDIA Alpamayo 1.5 as a Git submodule,
-licensed under the Apache License 2.0.
+licensed separately under the Apache License 2.0.
 
 See `third_party/alpamayo1.5/LICENSE` for details.
 
 ## Model Weights
 
 NVIDIA Alpamayo 1.5 model weights are not redistributed by this repository and
-are not covered by this repository's MIT License. The model weights are governed
-by the license and usage terms published with the Hugging Face model card:
+are not covered by this repository's Apache License 2.0. The model weights are
+governed by the license and usage terms published with the Hugging Face model
+card:
 
 - https://huggingface.co/nvidia/Alpamayo-1.5-10B
 

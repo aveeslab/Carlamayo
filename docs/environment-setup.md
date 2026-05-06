@@ -137,6 +137,6 @@ Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
 
 ## 4. License Boundaries
 
-- This repository's CARLA integration code is MIT licensed. See `LICENSE`.
+- This repository's CARLA integration code is licensed under the Apache License 2.0. See `LICENSE`.
 - NVIDIA Alpamayo 1.5 source code is a submodule licensed under Apache License 2.0. See `third_party/alpamayo1.5/LICENSE`.
 - NVIDIA Alpamayo 1.5 model weights are not redistributed here and are governed by the Hugging Face model card/license terms, including non-commercial restrictions where applicable.

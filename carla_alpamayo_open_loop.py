@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 AVEES Lab
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 #
 # Open-loop inference script for CARLA-collected data with Alpamayo 1.5.
 

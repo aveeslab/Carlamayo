@@ -109,8 +109,8 @@ If you encounter OOM errors:
 
 ## License and Third-Party Notices
 
-This repository's CARLA integration code and documentation are licensed under the MIT License. See [LICENSE](LICENSE).
+This repository's CARLA integration code and documentation are licensed under the Apache License 2.0. See [LICENSE](LICENSE).
 
 This repository does not vendor NVIDIA Alpamayo 1.5 source code directly. Alpamayo is linked as a git submodule under `third_party/alpamayo1.5` and is licensed separately under Apache License 2.0. See `third_party/alpamayo1.5/LICENSE` and [NOTICE](NOTICE).
 
-NVIDIA Alpamayo 1.5 model weights are not redistributed by this repository and are not covered by this repository's MIT License. Review the [Hugging Face model card](https://huggingface.co/nvidia/Alpamayo-1.5-10B) for the model license and usage restrictions, including non-commercial restrictions where applicable.
+NVIDIA Alpamayo 1.5 model weights are not redistributed by this repository and are not covered by this repository's Apache License 2.0. Review the [Hugging Face model card](https://huggingface.co/nvidia/Alpamayo-1.5-10B) for the model license and usage restrictions, including non-commercial restrictions where applicable.
