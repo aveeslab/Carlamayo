@@ -132,9 +132,3 @@ export CARLA_ROOT=~/carla
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
-
-## 4. License Boundaries
-
-- Apache License 2.0 - see `LICENSE` for details.
-- NVIDIA Alpamayo 1.5 source code is a submodule licensed under Apache License 2.0. See `third_party/alpamayo1.5/LICENSE`.
-- NVIDIA Alpamayo 1.5 model weights are not redistributed here and are governed by the Hugging Face model card/license terms, including non-commercial restrictions where applicable.
