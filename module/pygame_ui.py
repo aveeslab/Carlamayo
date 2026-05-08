@@ -105,6 +105,12 @@ class ClosedLoopPygameUI:
         self.clock.tick(30)
         self.last_draw_ts = time.time()
 
+    def capture_frame(self) -> np.ndarray:
+        """Return the current rendered window as an RGB frame."""
+
+        frame = self.pygame.surfarray.array3d(self.screen)
+        return np.ascontiguousarray(np.swapaxes(frame, 0, 1))
+
     def _frame_to_surface(self, frame_rgb: np.ndarray, max_width: int, max_height: int):
         frame = np.asarray(frame_rgb)
         if frame.ndim != 3 or frame.shape[2] != 3:
