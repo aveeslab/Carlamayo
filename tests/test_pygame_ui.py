@@ -92,3 +92,21 @@ def test_pygame_ui_vqa_mode_enter_applies_question():
         assert state.input_text == ""
     finally:
         ui.close()
+
+
+def test_pygame_ui_capture_frame_returns_full_window_rgb_image():
+    import numpy as np
+
+    ui = ClosedLoopPygameUI(width=320, height=240)
+    state = NavigationControlState()
+    camera_frame = np.full((24, 32, 3), fill_value=(20, 80, 140), dtype=np.uint8)
+    try:
+        ui.draw(camera_frame, state, {"frame": 7, "speed_kmh": 12.5})
+
+        captured = ui.capture_frame()
+
+        assert captured.shape == (240, 320, 3)
+        assert captured.dtype == np.uint8
+        assert captured.flags.c_contiguous
+    finally:
+        ui.close()

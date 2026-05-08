@@ -27,7 +27,7 @@ def test_quantized_load_model_uses_auto_device_map_by_default(monkeypatch):
 
     assert model is fake_model
     assert processor == "processor"
-    assert calls[0][0] == "nvidia/Alpamayo-R1-10B"
+    assert calls[0][0] == "nvidia/Alpamayo-1.5-10B"
     assert calls[0][1]["device_map"] == "auto"
     assert fake_model.moved_to is None
 
@@ -46,6 +46,7 @@ def test_full_precision_load_model_uses_device_map_when_requested(monkeypatch):
     model, _processor = inference.load_model(use_quantization=False, device_map="auto")
 
     assert model is fake_model
+    assert calls[0][0] == "nvidia/Alpamayo-1.5-10B"
     assert calls[0][1]["device_map"] == "auto"
     assert fake_model.moved_to is None
 

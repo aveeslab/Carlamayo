@@ -149,6 +149,7 @@ def test_closed_loop_pygame_ui_starts_paused(monkeypatch):
 
     assert args.pygame_ui is True
     assert args.start_paused is True
+    assert args.pygame_ui_video == "carla_alpamayo_closed_loop_result_pygame_ui.mp4"
 
 
 def test_closed_loop_without_pygame_ui_does_not_start_paused(monkeypatch):
@@ -158,6 +159,20 @@ def test_closed_loop_without_pygame_ui_does_not_start_paused(monkeypatch):
 
     assert args.pygame_ui is False
     assert args.start_paused is False
+    assert args.pygame_ui_video is None
+
+
+def test_pygame_ui_video_path_is_derived_from_output_video():
+    assert (
+        closed_loop.derive_pygame_ui_video_path("results/closed-loop.mp4")
+        == "results/closed-loop_pygame_ui.mp4"
+    )
+
+
+def test_vqa_answer_preview_does_not_turn_empty_answer_into_ellipsis():
+    assert closed_loop.format_vqa_answer_preview("") == "(empty answer)"
+    assert closed_loop.format_vqa_answer_preview("clear", limit=10) == "clear"
+    assert closed_loop.format_vqa_answer_preview("a" * 12, limit=10) == "aaaaaaaaaa..."
 
 
 def test_closed_loop_rejects_start_paused_option(monkeypatch):

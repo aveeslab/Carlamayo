@@ -1,6 +1,8 @@
 """Alpamayo inference utilities."""
 
+import copy
 import math
+import re
 
 import torch
 import numpy as np
@@ -17,6 +19,19 @@ from .vlm_generate_optimization import VlmGenerateTiming, optimized_vlm_generate
 patch_legacy_hydra_targets()
 
 SUPPORTED_CUDA_LINALG_LIBRARIES = {"default", "cusolver", "magma"}
+ALPAMAYO_MODEL_NAME = "nvidia/Alpamayo-1.5-10B"
+SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+?\|>|</s>|<s>")
+VQA_ANSWER_TERMINATORS = (
+    "<|answer_end|>",
+    "<|im_end|>",
+    "<|endoftext|>",
+    "<|cot_start|>",
+    "<|cot_end|>",
+    "<|meta_action_start|>",
+    "<|meta_action_end|>",
+    "<|question_start|>",
+    "<|question_end|>",
+)
 
 
 def configure_cuda_linalg_library(library: str | None):
@@ -52,7 +67,7 @@ def load_model(use_quantization: bool, device_map="auto"):
             bnb_4bit_quant_type="nf4",
         )
         model = Alpamayo1_5.from_pretrained(
-            "nvidia/Alpamayo-R1-10B",
+            ALPAMAYO_MODEL_NAME,
             quantization_config=quantization_config,
             device_map=device_map,
             torch_dtype=torch.bfloat16,
@@ -60,13 +75,13 @@ def load_model(use_quantization: bool, device_map="auto"):
     else:
         if device_map:
             model = Alpamayo1_5.from_pretrained(
-                "nvidia/Alpamayo-R1-10B",
+                ALPAMAYO_MODEL_NAME,
                 dtype=torch.bfloat16,
                 device_map=device_map,
             )
         else:
             model = Alpamayo1_5.from_pretrained(
-                "nvidia/Alpamayo-R1-10B",
+                ALPAMAYO_MODEL_NAME,
                 dtype=torch.bfloat16,
             ).to("cuda")
 
@@ -183,7 +198,7 @@ def _extract_text_field(extra, key):
 
     while True:
         if isinstance(value, str):
-            return value
+            return str(value).strip()
         if isinstance(value, (list, tuple)):
             if len(value) == 0:
                 return ""
@@ -199,7 +214,82 @@ def _extract_text_field(extra, key):
                 return ""
             value = value.reshape(-1)[0].item()
             continue
-        return str(value)
+        return str(value).strip()
+
+
+def _clean_generated_answer_text(text):
+    text = SPECIAL_TOKEN_RE.sub("", str(text))
+    return " ".join(text.split()).strip()
+
+
+def _extract_answer_from_decoded_text(decoded_text):
+    text = str(decoded_text).strip()
+    if not text:
+        return ""
+
+    if "<|answer_end|>" in text:
+        candidate = text.partition("<|answer_end|>")[0]
+        if "<|answer_start|>" in candidate:
+            candidate = candidate.rsplit("<|answer_start|>", 1)[1]
+        return _clean_generated_answer_text(candidate)
+
+    if "<|answer_start|>" in text:
+        candidate = text.rsplit("<|answer_start|>", 1)[1]
+    else:
+        candidate = text
+
+    for terminator in VQA_ANSWER_TERMINATORS:
+        if terminator == "<|answer_end|>":
+            continue
+        candidate = candidate.split(terminator, 1)[0]
+
+    return _clean_generated_answer_text(candidate)
+
+
+def _generate_vqa_text_with_partial_answer_fallback(
+    model,
+    model_inputs,
+    top_p=0.98,
+    top_k=None,
+    temperature=0.6,
+    num_samples=1,
+    max_generation_length=256,
+):
+    """Generate VQA text while preserving partial answers without ``answer_end``."""
+
+    tokenized_data = dict(model_inputs["tokenized_data"])
+    input_ids = tokenized_data.pop("input_ids")
+
+    generation_config = copy.deepcopy(model.vlm.generation_config)
+    generation_config.top_p = top_p
+    generation_config.temperature = temperature
+    generation_config.do_sample = True
+    generation_config.num_return_sequences = num_samples
+    generation_config.max_new_tokens = max_generation_length
+    generation_config.output_logits = False
+    generation_config.return_dict_in_generate = True
+    generation_config.top_k = top_k
+    generation_config.pad_token_id = model.tokenizer.pad_token_id
+
+    generated = model.vlm.generate(
+        input_ids=input_ids,
+        **tokenized_data,
+        generation_config=generation_config,
+    )
+    sequences = generated["sequences"] if isinstance(generated, dict) else generated.sequences
+    generated_tokens = sequences[:, input_ids.shape[1] :]
+    decoded_batch = model.tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
+
+    batch_size = int(input_ids.shape[0])
+    raw = np.array(decoded_batch, dtype=object).reshape([batch_size, num_samples])
+    answers = np.array(
+        [_extract_answer_from_decoded_text(text) for text in decoded_batch],
+        dtype=object,
+    ).reshape([batch_size, num_samples])
+    return {
+        "answer": answers,
+        "raw_answer": raw,
+    }
 
 
 def extract_cot_text(extra):
@@ -207,7 +297,16 @@ def extract_cot_text(extra):
 
 
 def extract_answer_text(extra):
-    return _extract_text_field(extra, "answer")
+    answer = _extract_text_field(extra, "answer")
+    if answer:
+        return _extract_answer_from_decoded_text(answer)
+
+    for key in ("raw_answer", "raw_text", "decoded_answer", "decoded_text"):
+        raw_answer = _extract_text_field(extra, key)
+        if raw_answer:
+            return _extract_answer_from_decoded_text(raw_answer)
+
+    return ""
 
 
 def run_vqa(
@@ -238,6 +337,15 @@ def run_vqa(
     model_inputs = helper.to_device({"tokenized_data": inputs}, "cuda")
 
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+        if hasattr(model, "vlm") and hasattr(model, "tokenizer"):
+            return _generate_vqa_text_with_partial_answer_fallback(
+                model,
+                model_inputs,
+                top_p=0.98,
+                temperature=0.6,
+                num_samples=1,
+                max_generation_length=256,
+            )
         return model.generate_text(
             data=model_inputs,
             top_p=0.98,

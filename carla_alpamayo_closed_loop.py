@@ -1,6 +1,7 @@
 """Modular entrypoint for CARLA closed-loop control with Alpamayo."""
 
 import argparse
+import os
 import queue
 import threading
 import time
@@ -27,6 +28,23 @@ from module.inference import (
     run_vqa,
     select_trajectory_by_prev_similarity,
 )
+
+
+def derive_pygame_ui_video_path(output_video_path):
+    """Return the companion video path for recorded Pygame UI frames."""
+
+    root, ext = os.path.splitext(output_video_path)
+    return f"{root}_pygame_ui{ext or '.mp4'}"
+
+
+def format_vqa_answer_preview(answer, limit=160):
+    """Return a non-misleading one-line VQA answer preview for logs."""
+
+    answer = str(answer or "").strip()
+    if not answer:
+        return "(empty answer)"
+    suffix = "..." if len(answer) > limit else ""
+    return f"{answer[:limit]}{suffix}"
 
 
 def capture_initial_ui_frame(carla_if, frame_count):
@@ -123,6 +141,9 @@ def parse_args():
     )
     args = parser.parse_args()
     args.start_paused = bool(args.pygame_ui)
+    args.pygame_ui_video = (
+        derive_pygame_ui_video_path(cfg.OUTPUT_VIDEO) if args.pygame_ui else None
+    )
     return args
 
 
@@ -166,6 +187,7 @@ def main():
     carla_if = CARLAInterface()
     video_recorder = VideoRecorder(cfg.OUTPUT_VIDEO, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
     pygame_ui = None
+    pygame_ui_recorder = None
     latest_ui_frame = None
     latest_telemetry = {}
 
@@ -177,6 +199,14 @@ def main():
             height=cfg.PYGAME_WINDOW_HEIGHT,
             mode=args.mode,
         )
+        pygame_ui_recorder = VideoRecorder(args.pygame_ui_video, fps=cfg.VIDEO_FPS)
+
+    def draw_pygame_ui(frame_rgb, telemetry):
+        if pygame_ui is None:
+            return
+        pygame_ui.draw(frame_rgb, nav_state, telemetry)
+        if pygame_ui_recorder is not None:
+            pygame_ui_recorder.add_frame(pygame_ui.capture_frame())
 
     try:
         carla_if.connect()
@@ -416,6 +446,8 @@ def main():
         print("\nStarting control loop...")
         if cfg.SAVE_VIDEO:
             print(f"Recording video to: {cfg.OUTPUT_VIDEO}")
+        if pygame_ui_recorder is not None:
+            print(f"Recording Pygame UI to: {args.pygame_ui_video}")
         print("-" * 60)
 
         frame_count = 0
@@ -427,7 +459,7 @@ def main():
                 carla_if,
                 frame_count,
             )
-            pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
+            draw_pygame_ui(latest_ui_frame, latest_telemetry)
 
         while True:
             if pygame_ui is not None:
@@ -455,7 +487,7 @@ def main():
                         "frame": frame_count,
                         "inference_time": current_inference_time,
                     }
-                    pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
+                    draw_pygame_ui(latest_ui_frame, latest_telemetry)
                     continue
 
             carla_if.tick()
@@ -552,7 +584,7 @@ def main():
                             f"(submitted at frame {latest_result['frame_submitted']})"
                         )
                         print(f"    Q: {latest_result.get('vqa_question') or '(none)'}")
-                        print(f"    A: {answer[:160]}...")
+                        print(f"    A: {format_vqa_answer_preview(answer)}")
                     elif "error" not in latest_result:
                         pred_xyz = latest_result["pred_xyz"]
                         extra = latest_result["extra"]
@@ -623,9 +655,11 @@ def main():
                             last_vqa_completed_revision = nav_state.revision
                             print(f"[Frame {frame_count}] VQA: {model_inference_time:.2f}s")
                             print(f"    Q: {nav_state.vqa_question}")
-                            print(f"    A: {answer[:160]}...")
+                            print(f"    A: {format_vqa_answer_preview(answer)}")
                     else:
-                        navigation_text = nav_state.navigation_text if args.mode == "navigation" else ""
+                        navigation_text = (
+                            nav_state.navigation_text if args.mode == "navigation" else ""
+                        )
                         navigation_weight = (
                             nav_state.navigation_weight if args.mode == "navigation" else 1.0
                         )
@@ -710,7 +744,7 @@ def main():
                     "inference_time": current_inference_time,
                 }
                 if pygame_ui is not None:
-                    pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
+                    draw_pygame_ui(latest_ui_frame, latest_telemetry)
 
                 print(
                     f"[Frame {frame_count}] Speed: {state['speed']*3.6:.1f} km/h, "
@@ -730,7 +764,7 @@ def main():
                     "inference_time": current_inference_time,
                 }
                 if pygame_ui is not None:
-                    pygame_ui.draw(latest_ui_frame, nav_state, latest_telemetry)
+                    draw_pygame_ui(latest_ui_frame, latest_telemetry)
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
@@ -748,6 +782,8 @@ def main():
                 worker_thread.join(timeout=2.0)
         if cfg.SAVE_VIDEO and video_recorder:
             video_recorder.save()
+        if pygame_ui_recorder is not None:
+            pygame_ui_recorder.save()
         if pygame_ui is not None:
             pygame_ui.close()
         carla_if.cleanup()
