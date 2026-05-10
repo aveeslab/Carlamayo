@@ -34,13 +34,13 @@ Run open-loop inference on collected CARLA data:
 
 ```bash
 source a1_5_venv/bin/activate
-python carla_alpamayo_open_loop.py
+python carlamayo_open_loop.py
 ```
 
 Optional 4-bit quantized mode:
 
 ```bash
-python carla_alpamayo_open_loop.py --quantization
+python carlamayo_open_loop.py --quantization
 ```
 
 Output:
@@ -79,14 +79,14 @@ Run closed-loop inference from the repository root:
 
 ```bash
 source a1_5_carla_venv/bin/activate
-python carla_alpamayo_closed_loop.py
+python carlamayo_closed_loop.py
 ```
 
 Optional pygame UI modes:
 
 ```bash
 # Normal closed-loop trajectory control with camera UI.
-python carla_alpamayo_closed_loop.py --mode normal --pygame-ui
+python carlamayo_closed_loop.py --mode normal --pygame-ui
 ```
 
 When `--pygame-ui` is enabled, the loop starts paused automatically so you can
@@ -100,7 +100,7 @@ Mode-specific usage guides:
 Optional async inference mode:
 
 ```bash
-python carla_alpamayo_closed_loop.py --async
+python carlamayo_closed_loop.py --async
 ```
 
 Output:
@@ -112,7 +112,7 @@ For lower VRAM machines, the validated command was:
 ```bash
 source a1_5_carla_venv/bin/activate
 export CARLA_ROOT=~/carla
-python carla_alpamayo_closed_loop.py --quantization --async
+python carlamayo_closed_loop.py --quantization --async
 ```
 
 ## 4. NVIDIA Original Test Script

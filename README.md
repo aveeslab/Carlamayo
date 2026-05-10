@@ -53,8 +53,8 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 
 <repo-root>/
 ├── data_collect.py
-├── carla_alpamayo_open_loop.py
-├── carla_alpamayo_closed_loop.py
+├── carlamayo_open_loop.py
+├── carlamayo_closed_loop.py
 ├── module/
 │   ├── config.py
 │   ├── pid_controller.py
