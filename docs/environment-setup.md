@@ -50,13 +50,12 @@ If your CARLA archive extracts into a nested package directory, move or symlink 
 
 ### 1.2 Create a CARLA Python environment
 
-From the repository root:
+From the repository root, install `requirements-carla.txt`; it pins `carla==0.9.16` to match the CARLA server.
 
 ```bash
 python3.10 -m venv venv-carla
 source venv-carla/bin/activate
 pip install -r requirements-carla.txt
-pip install carla==0.9.16
 ```
 
 
@@ -113,7 +112,7 @@ Create or copy your token from: <https://huggingface.co/settings/tokens>
 
 Closed-loop execution needs Alpamayo and CARLA Python packages in the same environment.
 
-From the repository root:
+From the repository root, install `requirements-carla.txt`; it pins `carla==0.9.16` to match the CARLA server.
 
 ```bash
 uv venv a1_5_carla_venv --python 3.12
@@ -121,7 +120,6 @@ source a1_5_carla_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install --no-deps -e third_party/alpamayo1.5
-python -m pip install carla==0.9.16
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
 
