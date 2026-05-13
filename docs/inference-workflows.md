@@ -95,6 +95,12 @@ Mode-specific usage guides:
 - [Navigation Mode](navigation-mode.md)
 - [VQA Mode](vqa-mode.md)
 
+Optional 4-bit quantized mode:
+
+```bash
+python carlamayo_open_loop.py --quantization
+```
+
 Optional async inference mode:
 
 ```bash
