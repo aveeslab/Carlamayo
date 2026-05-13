@@ -19,8 +19,8 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 Clone with the NVIDIA Alpamayo 1.5 submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/aveeslab/Alpamayo-CARLA.git
-cd Alpamayo-CARLA
+git clone --recurse-submodules https://github.com/aveeslab/Carlamayo.git
+cd Carlamayo
 ```
 
 If you already cloned the repository without submodules, initialize them from the repository root:
