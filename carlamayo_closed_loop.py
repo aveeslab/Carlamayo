@@ -139,6 +139,11 @@ def parse_args():
             'Default: "magma" to avoid cuSOLVER cholesky handle failures.'
         ),
     )
+    parser.add_argument(
+        "--debug-worker-traceback",
+        action="store_true",
+        help="Print async inference worker tracebacks when worker requests fail.",
+    )
     args = parser.parse_args()
     args.start_paused = bool(args.pygame_ui)
     args.pygame_ui_video = (
@@ -425,6 +430,7 @@ def main():
                         result = {
                             "frame_submitted": req_frame,
                             "error": str(e),
+                            "traceback": traceback.format_exc(),
                             "result_ts": time.time(),
                             "respawn_revision": req.get("respawn_revision"),
                         }
@@ -505,7 +511,21 @@ def main():
                 _auto_respawn(collision_decision.reason)
                 continue
 
-            images = carla_if.get_camera_images()
+            try:
+                images = carla_if.get_camera_images()
+            except TimeoutError as exc:
+                print(f"[Frame {frame_count}] Warning: {exc}; braking and skipping this tick.")
+                carla_if.apply_control(0.0, 0.0, 1.0)
+                prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
+                latest_telemetry = {
+                    "frame": frame_count,
+                    "speed_kmh": state["speed"] * 3.6,
+                    "steering": 0.0,
+                    "inference_time": current_inference_time,
+                }
+                if pygame_ui is not None:
+                    draw_pygame_ui(latest_ui_frame, latest_telemetry)
+                continue
             if len(images) > 1:
                 latest_ui_frame = images[1]
             latest_telemetry = {
@@ -618,6 +638,8 @@ def main():
                         print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
                     else:
                         print(f"[Frame {frame_count}] Inference error: {latest_result['error']}")
+                        if args.debug_worker_traceback and latest_result.get("traceback"):
+                            print(latest_result["traceback"].rstrip())
             else:
                 if len(frame_buffer) >= cfg.NUM_FRAMES:
                     images_array = np.zeros(

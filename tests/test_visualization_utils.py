@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 
 from module.visualization import (
@@ -31,6 +32,14 @@ def test_project_trajectory_to_image_accepts_torch_tensor():
 
     assert rendered.shape == image.shape
     assert rendered.sum() > 0
+
+
+def test_project_trajectory_to_image_rejects_invalid_rank():
+    image = np.zeros((80, 120, 3), dtype=np.uint8)
+    trajectory = np.zeros((2, 3, 4, 5), dtype=np.float32)
+
+    with pytest.raises(ValueError, match=r"Expected trajectory with ndim 2 or 3"):
+        project_trajectory_to_image(image, trajectory)
 
 
 def test_create_visualization_frame_preserves_rgb_shape_and_adds_overlay():

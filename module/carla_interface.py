@@ -285,6 +285,7 @@ class CARLAInterface:
 
     def get_camera_images(self):
         images = []
+        missing = []
         for name in self.camera_order:
             try:
                 data = self.sensor_queues[name].get(timeout=1.0)
@@ -293,7 +294,9 @@ class CARLAInterface:
                 array = cv2.cvtColor(array, cv2.COLOR_BGR2RGB)
                 images.append(array)
             except queue.Empty:
-                images.append(np.zeros((cfg.IMG_HEIGHT, cfg.IMG_WIDTH, 3), dtype=np.uint8))
+                missing.append(name)
+        if missing:
+            raise TimeoutError(f"Missing camera frames: {missing}")
         return np.array(images)
 
     def get_ego_state(self):
@@ -355,44 +358,57 @@ class CARLAInterface:
             return
         try:
             self.client.get_trafficmanager(self.tm_port).set_synchronous_mode(False)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: failed to disable TrafficManager synchronous mode: {exc}")
         if self.npc_walker_controller_ids:
             try:
                 controllers = self.world.get_actors(self.npc_walker_controller_ids)
                 for controller in controllers:
                     try:
                         controller.stop()
-                    except Exception:
-                        pass
-                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.npc_walker_controller_ids])
-            except Exception:
-                pass
+                    except Exception as exc:
+                        controller_id = getattr(controller, "id", "unknown")
+                        print(f"Warning: failed to stop walker controller {controller_id}: {exc}")
+            except Exception as exc:
+                print(f"Warning: failed to fetch walker controllers for cleanup: {exc}")
+            try:
+                self.client.apply_batch(
+                    [carla.command.DestroyActor(x) for x in self.npc_walker_controller_ids]
+                )
+            except Exception as exc:
+                print(f"Warning: failed to destroy walker controllers: {exc}")
         if self.npc_walker_ids:
             try:
-                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.npc_walker_ids])
-            except Exception:
-                pass
+                self.client.apply_batch(
+                    [carla.command.DestroyActor(x) for x in self.npc_walker_ids]
+                )
+            except Exception as exc:
+                print(f"Warning: failed to destroy NPC walkers: {exc}")
         if self.npc_vehicle_ids:
             try:
-                self.client.apply_batch([carla.command.DestroyActor(x) for x in self.npc_vehicle_ids])
-            except Exception:
-                pass
-        for sensor in self.sensors.values():
+                self.client.apply_batch(
+                    [carla.command.DestroyActor(x) for x in self.npc_vehicle_ids]
+                )
+            except Exception as exc:
+                print(f"Warning: failed to destroy NPC vehicles: {exc}")
+        for sensor_name, sensor in self.sensors.items():
             try:
                 sensor.stop()
+            except Exception as exc:
+                print(f"Warning: failed to stop sensor {sensor_name}: {exc}")
+            try:
                 sensor.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Warning: failed to destroy sensor {sensor_name}: {exc}")
         if self.ego_vehicle:
             try:
                 self.ego_vehicle.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                print(f"Warning: failed to destroy ego vehicle: {exc}")
         try:
             settings = self.world.get_settings()
             settings.synchronous_mode = False
             settings.fixed_delta_seconds = None
             self.world.apply_settings(settings)
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"Warning: failed to restore world asynchronous mode: {exc}")

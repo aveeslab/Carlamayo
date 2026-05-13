@@ -65,7 +65,7 @@ def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, camera_height
     elif arr.ndim == 3:
         traj_samples = arr[:, :, :3]
     else:
-        return result
+        raise ValueError(f"Expected trajectory with ndim 2 or 3, got shape {arr.shape}")
 
     num_samples = traj_samples.shape[0]
     selected_idx = int(np.clip(selected_idx, 0, max(0, num_samples - 1)))
