@@ -1,6 +1,6 @@
 numpy>=1.26
 opencv-python>=4.10
 pygame>=2.6
-# Install `carla` separately to match your CARLA server version.
-# Example:
-# pip install /path/to/carla-<version>-cp310-*.whl
+# Recommended for CARLA 0.9.16. If the PyPI wheel is unavailable for your
+# Python/CARLA combination, install the matching local CARLA wheel instead.
+carla==0.9.16

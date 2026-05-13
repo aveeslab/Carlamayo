@@ -6,6 +6,8 @@
 
 ![Closed-loop Demo](assets/carla_alpamayo_demo.gif)
 
+[![CI](https://github.com/aveeslab/Carlamayo/actions/workflows/ci.yml/badge.svg)](https://github.com/aveeslab/Carlamayo/actions/workflows/ci.yml)
+
 </div>
 
 > **📖 Please read the [Hugging Face Model Card](https://huggingface.co/nvidia/Alpamayo-1.5-10B) first.**
@@ -42,48 +44,30 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 - [Navigation Mode](docs/navigation-mode.md)
 - [VQA Mode](docs/vqa-mode.md)
 
+## Validation Status
+
+- Lightweight unit tests: covered by GitHub Actions CI (`pytest tests`).
+- Static formatting/linting: checked with Ruff.
+- Live CARLA closed-loop run: manually validated on CARLA 0.9.16 with an RTX 4080 SUPER 16 GB using `--mode normal --quantization`.
+- Full Alpamayo inference: requires gated model access and a suitable GPU; full precision typically needs at least 24 GB VRAM.
+
 ## Project Structure
 
 ```
-~/carla/
-├── Agents/
-├── PythonAPI/
-...
-└── CarlaUE4.sh
-
 <repo-root>/
-├── data_collect.py
-├── carlamayo_open_loop.py
-├── carlamayo_closed_loop.py
-├── module/
-│   ├── config.py
-│   ├── data_collection.py
-│   ├── open_loop_dataset.py
-│   ├── pid_controller.py
-│   ├── navigation_control.py
-│   ├── pygame_ui.py
-│   ├── visualization.py
-│   ├── carla_interface.py
-│   └── inference.py
-├── third_party/
-│   └── alpamayo1.5/            # NVIDIA Alpamayo 1.5 git submodule
-├── docs/
-│   ├── environment-setup.md
-│   ├── inference-workflows.md
-│   ├── navigation-mode.md
-│   └── vqa-mode.md
-├── tests/
-│   ├── test_config.py
-│   ├── test_data_collection.py
-│   ├── test_inference_utils.py
-│   ├── test_navigation_control.py
-│   ├── test_open_loop_dataset.py
-│   ├── test_respawn_control.py
-│   └── test_visualization_utils.py
-├── requirements-carla.txt
-├── requirements-alpamayo.txt
-├── LICENSE
-└── README.md
+├── data_collect.py              # Collect synchronized CARLA camera/LiDAR/trajectory data.
+├── carlamayo_open_loop.py       # Run Alpamayo 1.5 inference on recorded CARLA data.
+├── carlamayo_closed_loop.py     # Run closed-loop CARLA control modes.
+├── module/                      # Shared CARLA, inference, control, UI, and visualization helpers.
+├── tests/                       # Simulator-free unit tests for lightweight helpers.
+├── docs/                        # Environment setup and workflow guides.
+├── assets/                      # README images and demo media.
+├── third_party/alpamayo1.5/     # NVIDIA Alpamayo 1.5 git submodule.
+├── .github/workflows/ci.yml     # Lightweight GitHub Actions test workflow.
+├── pyproject.toml               # Python project metadata and Ruff configuration.
+├── uv.lock                      # Locked uv dependency graph for reproducible installs.
+├── requirements-alpamayo.txt    # Additional Alpamayo runtime packages.
+└── requirements-carla.txt       # CARLA 0.9.16 data-collection/runtime packages.
 ```
 
 Generated data and videos such as `carla_data/` and `carla_alpamayo_*.mp4` are ignored by git.
