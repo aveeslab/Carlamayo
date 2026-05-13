@@ -1,6 +1,5 @@
 """PID controller helpers and official CARLA follower."""
 
-import math
 import os
 import sys
 

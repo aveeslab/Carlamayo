@@ -183,6 +183,101 @@ def create_visualization_frame(
     return cv2.cvtColor(vis_img, cv2.COLOR_BGR2RGB)
 
 
+def create_open_loop_visualization_frame(
+    cam_img,
+    pred_xyz,
+    frame_count,
+    total_frames,
+    inference_time,
+    cot_text,
+):
+    """Create one open-loop visualization frame with trajectory and text overlays."""
+
+    vis_img = project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0)
+    vis_img = cv2.cvtColor(vis_img, cv2.COLOR_RGB2BGR)
+    height, width = vis_img.shape[:2]
+
+    header = f"Frame: {frame_count}/{total_frames} | Inference: {inference_time:.2f}s"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 1.0
+    thickness = 2
+    (text_width, text_height), _ = cv2.getTextSize(header, font, font_scale, thickness)
+    pad_x = 14
+    pad_y = 14
+    box_x1 = 10
+    box_y1 = 10
+    box_x2 = min(width - 10, box_x1 + text_width + pad_x * 2)
+    box_y2 = box_y1 + text_height + pad_y * 2
+    overlay = vis_img.copy()
+    cv2.rectangle(overlay, (box_x1, box_y1), (box_x2, box_y2), (0, 0, 0), -1)
+    vis_img = cv2.addWeighted(overlay, 0.65, vis_img, 0.35, 0)
+    cv2.putText(
+        vis_img,
+        header,
+        (box_x1 + pad_x, box_y1 + pad_y + text_height),
+        font,
+        font_scale,
+        (255, 255, 255),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+    overlay = vis_img.copy()
+    cv2.rectangle(overlay, (10, height - 170), (width - 10, height - 10), (0, 0, 0), -1)
+    vis_img = cv2.addWeighted(overlay, 0.6, vis_img, 0.4, 0)
+
+    cot_display = str(cot_text or "").strip()
+    cot_display = cot_display[:240] + "..." if len(cot_display) > 240 else cot_display
+    lines = textwrap.wrap(f"Chain-of-Causation: {cot_display}", width=120)
+    y_offset = height - 125
+    for line in lines[:4]:
+        cv2.putText(
+            vis_img,
+            line,
+            (20, y_offset),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        y_offset += 30
+
+    return cv2.cvtColor(vis_img, cv2.COLOR_BGR2RGB)
+
+
+def save_open_loop_video(
+    predictions,
+    camera_images,
+    cot_texts,
+    inference_times,
+    output_path,
+    fps=5,
+):
+    """Render and save the open-loop inference summary video."""
+
+    total_frames = len(predictions)
+    recorder = VideoRecorder(output_path, fps=fps)
+    for frame_index, (pred_xyz, cam_img, cot_text, inference_time) in enumerate(
+        zip(predictions, camera_images, cot_texts, inference_times, strict=True),
+        start=1,
+    ):
+        recorder.add_frame(
+            create_open_loop_visualization_frame(
+                cam_img=cam_img,
+                pred_xyz=pred_xyz,
+                frame_count=frame_index,
+                total_frames=total_frames,
+                inference_time=inference_time,
+                cot_text=cot_text,
+            )
+        )
+        if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
+            print(f"  Rendering frame {frame_index}/{total_frames}...")
+
+    recorder.save()
+
+
 def transcode_video_for_browser_compat(source_path, output_path):
     """Transcode OpenCV output to H.264/yuv420p for VS Code/browser players."""
     if shutil.which("ffmpeg") is None:

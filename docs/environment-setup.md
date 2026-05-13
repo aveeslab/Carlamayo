@@ -19,8 +19,8 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 Clone with the NVIDIA Alpamayo 1.5 submodule:
 
 ```bash
-git clone --recurse-submodules https://github.com/aveeslab/Alpamayo-CARLA.git
-cd Alpamayo-CARLA
+git clone --recurse-submodules https://github.com/aveeslab/Carlamayo.git
+cd Carlamayo
 ```
 
 If you already cloned the repository without submodules, initialize them from the repository root:
@@ -44,7 +44,7 @@ tar -xvzf carla-0-9-16-linux
 ./CarlaUE4.sh -RenderOffScreen
 ```
 
-> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
+> Do not add `-quality-level=Low`; low-quality rendering can make error.
 
 If your CARLA archive extracts into a nested package directory, move or symlink the CARLA root so that `~/carla` contains `CarlaUE4.sh` and `PythonAPI/`.
 
@@ -93,8 +93,6 @@ python -m pip install --no-deps -e third_party/alpamayo1.5
 python -m pip install -r requirements-alpamayo.txt
 ```
 
-`uv sync --active` installs the core `pyproject.toml` dependencies for this integration project. The editable install step exposes the `alpamayo1_5` Python package from the submodule. The extra `requirements-alpamayo.txt` step is still required for the CARLA inference scripts because they import OpenCV, SciPy, and optional 4-bit quantization support (`bitsandbytes`).
-
 ### 2.3 Authenticate with Hugging Face
 
 The model requires access to gated resources. Request access first:
@@ -134,9 +132,3 @@ export CARLA_ROOT=~/carla
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.
-
-## 4. License Boundaries
-
-- Apache License 2.0 - see `LICENSE` for details.
-- NVIDIA Alpamayo 1.5 source code is a submodule licensed under Apache License 2.0. See `third_party/alpamayo1.5/LICENSE`.
-- NVIDIA Alpamayo 1.5 model weights are not redistributed here and are governed by the Hugging Face model card/license terms, including non-commercial restrictions where applicable.

@@ -82,20 +82,6 @@ source a1_5_carla_venv/bin/activate
 python carlamayo_closed_loop.py
 ```
 
-Closed-loop now defaults to full-precision model loading. Add `--quantization`
-when you want the 4-bit quantized model path for lower VRAM usage.
-Model loading also defaults to `--device-map auto` to let Accelerate place
-weights across available devices instead of forcing all weights onto `cuda:0`.
-The closed-loop script also defaults to `--cuda-linalg-library magma`; this
-avoids a cuSOLVER `torch.linalg.cholesky` initialization failure observed in
-the Alpamayo action-space conversion path.
-Normal mode also disables unused returned VLM logits by default to reduce CUDA
-memory without changing sampling, diffusion settings, or the image-token budget
-set in `module/config.py`. Use `--keep-generate-logits` for the exact original
-returned-logits baseline.
-Collision auto-respawn is always enabled so long closed-loop runs restart the
-ego vehicle after a crash.
-
 Optional pygame UI modes:
 
 ```bash

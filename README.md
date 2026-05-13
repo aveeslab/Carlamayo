@@ -24,26 +24,17 @@
 
 ## Installation
 
-Clone with submodules, or initialize submodules after cloning:
-
-```bash
-git clone --recurse-submodules https://github.com/aveeslab/Alpamayo-CARLA.git
-cd Alpamayo-CARLA
-# If the repo was cloned without --recurse-submodules:
-git submodule update --init --recursive
-```
-
-Environment setup has been moved to a separate document:
+Environment setup by following document:
 
 - [Environment Setup](docs/environment-setup.md)
 
 ## Running Inference
 
-Data collection, open-loop inference, and closed-loop inference instructions have been moved to a separate document:
+Data collection, open-loop inference, and closed-loop inference by following document:
 
 - [Data Collection and Inference](docs/inference-workflows.md)
 
-## Closed-Loop UI Modes
+### Closed-Loop UI Modes
 
 The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 `--mode`. See the mode-specific usage guides:
@@ -66,6 +57,8 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 ├── carlamayo_closed_loop.py
 ├── module/
 │   ├── config.py
+│   ├── data_collection.py
+│   ├── open_loop_dataset.py
 │   ├── pid_controller.py
 │   ├── navigation_control.py
 │   ├── pygame_ui.py
@@ -79,6 +72,14 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 │   ├── inference-workflows.md
 │   ├── navigation-mode.md
 │   └── vqa-mode.md
+├── tests/
+│   ├── test_config.py
+│   ├── test_data_collection.py
+│   ├── test_inference_utils.py
+│   ├── test_navigation_control.py
+│   ├── test_open_loop_dataset.py
+│   ├── test_respawn_control.py
+│   └── test_visualization_utils.py
 ├── requirements-carla.txt
 ├── requirements-alpamayo.txt
 ├── LICENSE

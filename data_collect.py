@@ -1,31 +1,33 @@
-import glob
 import os
-import sys
 import queue
-import numpy as np
-import cv2
-import carla
 import random
-import time
 import json
-import logging
+
+import carla
+import cv2
+import numpy as np
+
+from module.data_collection import (
+    collect_synchronous_sensor_frame,
+    frame_file_path,
+    frame_is_complete,
+)
 
 # ==============================================================================
-# 1. 설정 (Configuration)
+# Configuration
 # ==============================================================================
 OUTPUT_DIR = "carla_data"
-# 원래 해상도로 복구 (그래픽 문제 아님)
 IMAGE_WIDTH = 1920
 IMAGE_HEIGHT = 1080
 FPS = 10
 FIXED_DELTA_SECONDS = 1.0 / FPS  # 0.1s
-WARMUP_SECONDS = 2.0             # 2초간 데이터 수집 없이 주행
+WARMUP_SECONDS = 2.0  # Drive briefly before recording sensor data.
 
-# NPC 설정
+# NPC configuration
 NUM_NPC_VEHICLES = 20
 NUM_NPC_WALKERS = 30
 
-# 센서 위치
+# Sensor poses in the ego vehicle frame.
 SENSOR_CONFIGS = {
     "cam_front_wide": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 120},
     "cam_front_tele": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 30},
@@ -38,63 +40,21 @@ SENSOR_CONFIGS = {
 }
 
 
-def _frame_file_path(output_dir, sensor_name, frame_id):
-    ext = "ply" if "lidar" in sensor_name else "jpg"
-    return os.path.join(output_dir, sensor_name, f"{frame_id:06d}.{ext}")
-
-
-def _frame_is_complete(output_dir, sensor_names, frame_id):
-    for sensor_name in sensor_names:
-        if not os.path.exists(_frame_file_path(output_dir, sensor_name, frame_id)):
-            return False
-    return True
-
-# ==============================================================================
-# 2. 유틸리티 함수
-# ==============================================================================
 def sensor_callback(sensor_data, sensor_queue, sensor_name):
-    # 동기 모드에서는 틱 타이밍이 중요하므로 큐에 넣을 때 블로킹 없이 넣음
+    """Queue sensor packets without blocking the synchronous CARLA tick."""
+
     if not sensor_queue.full():
         sensor_queue.put((sensor_data.frame, sensor_name, sensor_data))
 
-
-def collect_synchronous_sensor_frame(sensor_queue, expected_sensor_names, frame_id, timeout=5.0):
-    """Collect one complete synchronous sensor packet for a world tick frame.
-
-    CARLA sensors can leave older/newer frame messages in the shared queue,
-    especially after map reloads or when image encoding is slower than the
-    simulation tick.  Filter by the exact frame returned from ``world.tick()``
-    so trajectory poses and sensor files stay aligned.
-    """
-    deadline = time.time() + timeout
-    frame_data = {}
-    expected = set(expected_sensor_names)
-
-    while time.time() < deadline and set(frame_data) != expected:
-        remaining = max(0.1, deadline - time.time())
-        try:
-            sensor_frame, name, data = sensor_queue.get(True, remaining)
-        except queue.Empty:
-            break
-
-        if sensor_frame < frame_id:
-            continue
-        if sensor_frame > frame_id:
-            # This frame's packet is already incomplete; do not mix frames.
-            continue
-        if name in expected:
-            frame_data[name] = data
-
-    return frame_data
 
 def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
     print(f"Spawning {num_vehicles} vehicles and {num_walkers} walkers...")
     actor_list = []
 
-    # --- NPC 차량 ---
+    # NPC vehicles
     bp_lib = world.get_blueprint_library()
     vehicle_bps = bp_lib.filter("vehicle.*")
-    vehicle_bps = [x for x in vehicle_bps if int(x.get_attribute('number_of_wheels')) == 4]
+    vehicle_bps = [x for x in vehicle_bps if int(x.get_attribute("number_of_wheels")) == 4]
     spawn_points = world.get_map().get_spawn_points()
 
     number_of_spawn_points = len(spawn_points)
@@ -105,24 +65,28 @@ def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
 
     batch = []
     for n, transform in enumerate(spawn_points):
-        if n >= num_vehicles: break
+        if n >= num_vehicles:
+            break
         bp = random.choice(vehicle_bps)
-        if bp.has_attribute('color'):
-            color = random.choice(bp.get_attribute('color').recommended_values)
-            bp.set_attribute('color', color)
-        bp.set_attribute('role_name', 'autopilot')
-        batch.append(carla.command.SpawnActor(bp, transform)
-            .then(carla.command.SetAutopilot(carla.command.FutureActor, True, tm_port)))
+        if bp.has_attribute("color"):
+            color = random.choice(bp.get_attribute("color").recommended_values)
+            bp.set_attribute("color", color)
+        bp.set_attribute("role_name", "autopilot")
+        batch.append(
+            carla.command.SpawnActor(bp, transform).then(
+                carla.command.SetAutopilot(carla.command.FutureActor, True, tm_port)
+            )
+        )
 
     results = client.apply_batch_sync(batch, True)
     for response in results:
         if not response.error:
             actor_list.append(world.get_actor(response.actor_id))
-    
-    # --- NPC 보행자 ---
+
+    # NPC walkers
     walker_bps = bp_lib.filter("walker.pedestrian.*")
-    walker_controller_bp = bp_lib.find('controller.ai.walker')
-    
+    walker_controller_bp = bp_lib.find("controller.ai.walker")
+
     spawn_points = []
     for _ in range(num_walkers):
         spawn_point = carla.Transform()
@@ -134,10 +98,10 @@ def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
     batch = []
     for spawn_point in spawn_points:
         walker_bp = random.choice(walker_bps)
-        if walker_bp.has_attribute('is_invincible'):
-            walker_bp.set_attribute('is_invincible', 'false')
+        if walker_bp.has_attribute("is_invincible"):
+            walker_bp.set_attribute("is_invincible", "false")
         batch.append(carla.command.SpawnActor(walker_bp, spawn_point))
-    
+
     results = client.apply_batch_sync(batch, True)
     walkers_list = []
     for response in results:
@@ -148,7 +112,7 @@ def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
     batch = []
     for walker in walkers_list:
         batch.append(carla.command.SpawnActor(walker_controller_bp, carla.Transform(), walker))
-    
+
     results = client.apply_batch_sync(batch, True)
     for response in results:
         if not response.error:
@@ -160,9 +124,7 @@ def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
 
     return actor_list
 
-# ==============================================================================
-# 3. 메인 실행 루프
-# ==============================================================================
+
 def main():
     actor_list = []
     sensor_list = []
@@ -173,10 +135,9 @@ def main():
     tm = None
 
     try:
-        # 클라이언트 연결
-        client = carla.Client('localhost', 2000)
+        client = carla.Client("localhost", 2000)
         client.set_timeout(20.0)
-        world = client.load_world('Town02')
+        world = client.load_world("Town02")
         bp_lib = world.get_blueprint_library()
 
         if not os.path.exists(OUTPUT_DIR):
@@ -201,8 +162,8 @@ def main():
 
         # Ego Vehicle
         spawn_points = world.get_map().get_spawn_points()
-        vehicle_bp = bp_lib.find('vehicle.tesla.model3')
-        vehicle_bp.set_attribute('role_name', 'hero')
+        vehicle_bp = bp_lib.find("vehicle.tesla.model3")
+        vehicle_bp.set_attribute("role_name", "hero")
 
         ego_vehicle = None
         for _ in range(10):
@@ -222,15 +183,15 @@ def main():
         sensor_queue = queue.Queue()
 
         for name, cfg in SENSOR_CONFIGS.items():
-            cam_bp = bp_lib.find('sensor.camera.rgb')
-            cam_bp.set_attribute('image_size_x', str(IMAGE_WIDTH))
-            cam_bp.set_attribute('image_size_y', str(IMAGE_HEIGHT))
-            cam_bp.set_attribute('fov', str(cfg['fov']))
-            cam_bp.set_attribute('sensor_tick', '0.0')
+            cam_bp = bp_lib.find("sensor.camera.rgb")
+            cam_bp.set_attribute("image_size_x", str(IMAGE_WIDTH))
+            cam_bp.set_attribute("image_size_y", str(IMAGE_HEIGHT))
+            cam_bp.set_attribute("fov", str(cfg["fov"]))
+            cam_bp.set_attribute("sensor_tick", "0.0")
 
             transform = carla.Transform(
-                carla.Location(x=cfg['x'], y=cfg['y'], z=cfg['z']),
-                carla.Rotation(pitch=cfg['pitch'], yaw=cfg['yaw'])
+                carla.Location(x=cfg["x"], y=cfg["y"], z=cfg["z"]),
+                carla.Rotation(pitch=cfg["pitch"], yaw=cfg["yaw"]),
             )
 
             sensor = world.spawn_actor(cam_bp, transform, attach_to=ego_vehicle)
@@ -239,11 +200,11 @@ def main():
             sensor_list.append(sensor)
 
         # LiDAR
-        lidar_bp = bp_lib.find('sensor.lidar.ray_cast')
-        lidar_bp.set_attribute('channels', '64')
-        lidar_bp.set_attribute('rotation_frequency', str(FPS))
-        lidar_bp.set_attribute('points_per_second', '1200000')
-        lidar_bp.set_attribute('sensor_tick', '0.0')
+        lidar_bp = bp_lib.find("sensor.lidar.ray_cast")
+        lidar_bp.set_attribute("channels", "64")
+        lidar_bp.set_attribute("rotation_frequency", str(FPS))
+        lidar_bp.set_attribute("points_per_second", "1200000")
+        lidar_bp.set_attribute("sensor_tick", "0.0")
 
         lidar_transform = carla.Transform(carla.Location(x=0, z=2.5))
         lidar_sensor = world.spawn_actor(lidar_bp, lidar_transform, attach_to=ego_vehicle)
@@ -289,25 +250,25 @@ def main():
             for name in expected_sensor_names:
                 data = current_frame_data[name]
                 if "lidar" in name:
-                    data.save_to_disk(_frame_file_path(OUTPUT_DIR, name, frame_id))
+                    data.save_to_disk(frame_file_path(OUTPUT_DIR, name, frame_id))
                 else:
                     array = np.frombuffer(data.raw_data, dtype=np.dtype("uint8"))
                     array = np.reshape(array, (data.height, data.width, 4))
                     array = array[:, :, :3]
-                    filename = _frame_file_path(OUTPUT_DIR, name, frame_id)
+                    filename = frame_file_path(OUTPUT_DIR, name, frame_id)
                     if not cv2.imwrite(filename, array):
                         print(f"Warning: Failed to write image for {name} frame {frame_id}.")
                         frame_write_ok = False
 
             # Record pose only after all sensor files are confirmed on disk.
-            if frame_write_ok and _frame_is_complete(OUTPUT_DIR, expected_sensor_names, frame_id):
+            if frame_write_ok and frame_is_complete(OUTPUT_DIR, expected_sensor_names, frame_id):
                 trajectory_data[frame_id] = {
                     "x": round(tf.location.x, 6),
                     "y": round(tf.location.y, 6),
                     "z": round(tf.location.z, 6),
                     "pitch": round(tf.rotation.pitch, 6),
                     "yaw": round(tf.rotation.yaw, 6),
-                    "roll": round(tf.rotation.roll, 6)
+                    "roll": round(tf.rotation.roll, 6),
                 }
             else:
                 print(f"Warning: Incomplete frame {frame_id}; excluded from trajectory.json.")
@@ -321,7 +282,7 @@ def main():
             filtered_trajectory_data = {}
             dropped = 0
             for frame_id, pose in trajectory_data.items():
-                if _frame_is_complete(OUTPUT_DIR, expected_sensor_names, int(frame_id)):
+                if frame_is_complete(OUTPUT_DIR, expected_sensor_names, int(frame_id)):
                     filtered_trajectory_data[frame_id] = pose
                 else:
                     dropped += 1
@@ -329,8 +290,8 @@ def main():
             if dropped > 0:
                 print(f"Dropped {dropped} incomplete frame(s) from trajectory.json.")
 
-            json_path = os.path.join(OUTPUT_DIR, 'trajectory.json')
-            with open(json_path, 'w') as f:
+            json_path = os.path.join(OUTPUT_DIR, "trajectory.json")
+            with open(json_path, "w") as f:
                 json.dump(filtered_trajectory_data, f, indent=4)
 
         for sensor in sensor_list:
@@ -350,5 +311,6 @@ def main():
             client.apply_batch_sync([carla.command.DestroyActor(x) for x in actor_list], True)
         print("Done.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
