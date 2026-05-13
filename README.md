@@ -73,8 +73,13 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 │   ├── navigation-mode.md
 │   └── vqa-mode.md
 ├── tests/
+│   ├── test_config.py
 │   ├── test_data_collection.py
-│   └── test_open_loop_dataset.py
+│   ├── test_inference_utils.py
+│   ├── test_navigation_control.py
+│   ├── test_open_loop_dataset.py
+│   ├── test_respawn_control.py
+│   └── test_visualization_utils.py
 ├── requirements-carla.txt
 ├── requirements-alpamayo.txt
 ├── LICENSE
