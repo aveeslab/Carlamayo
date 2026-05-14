@@ -1,7 +1,10 @@
 """PID controller helpers and official CARLA follower."""
 
+from __future__ import annotations
+
 import os
 import sys
+from dataclasses import dataclass
 
 import carla
 import numpy as np
@@ -56,13 +59,19 @@ def local_to_world(vehicle_tf, wp_local):
     return np.asarray(wp_world, dtype=np.float64)
 
 
+@dataclass(frozen=True)
+class RawTargetWaypoint:
+    """Minimal waypoint-like target for CARLA VehiclePIDController."""
+
+    transform: carla.Transform
+
+
 class OfficialPIDFollower:
-    """CARLA official PID waypoint follower."""
+    """CARLA official PID follower for raw Alpamayo targets."""
 
     def __init__(self, world, vehicle):
         VehiclePIDController = _resolve_vehicle_pid_controller()
         self.world = world
-        self.map = world.get_map()
         self.vehicle = vehicle
         args_lateral = {
             "K_P": cfg.PID_LAT_KP,
@@ -106,7 +115,7 @@ class OfficialPIDFollower:
             y=float(wp_world[target_idx, 1]),
             z=float(wp_world[target_idx, 2]),
         )
-        target_wp = self.map.get_waypoint(loc, project_to_road=True, lane_type=carla.LaneType.Driving)
+        target_wp = RawTargetWaypoint(carla.Transform(loc, carla.Rotation()))
         return target_wp, target_idx, lookahead_m
 
     def compute_control(self, vehicle_tf, wp_ego, speed_mps):
@@ -132,7 +141,15 @@ class OfficialPIDFollower:
             "target_speed_kmh": target_speed_kmh,
             "lookahead_m": lookahead_m,
             "target_idx": int(target_idx),
-            "target_wp_xy": [float(target_wp.transform.location.x), float(target_wp.transform.location.y)],
+            "target_wp_xy": [
+                float(target_wp.transform.location.x),
+                float(target_wp.transform.location.y),
+            ],
+            "target_raw_xy": [
+                float(target_wp.transform.location.x),
+                float(target_wp.transform.location.y),
+            ],
+            "target_projected_to_road": False,
             "traj_extent": traj_extent,
         }
         return float(control.steer), float(control.throttle), float(control.brake), debug
