@@ -17,6 +17,8 @@ dependencies = [
   "flash-attn>=2.8.3",
   "matplotlib>=3.10.7",
   "seaborn>=0.13.2",
+  "opencv-python-headless>=4.10",
+  "alpamayo1-5",
 ]
 
 [dependency-groups]
@@ -31,6 +33,14 @@ dev = [
 [tool.uv]
 package = false
 no-build-isolation-package = ["flash-attn"]
+
+[tool.uv.workspace]
+members = [
+    "third_party/alpamayo1.5",
+]
+
+[tool.uv.sources]
+alpamayo1-5 = { workspace = true, editable = true }
 
 [tool.ruff]
 line-length = 100

@@ -1,4 +1,6 @@
 import importlib
+import importlib.machinery
+import importlib.util
 import queue
 import sys
 import types
@@ -12,10 +14,12 @@ fake_carla = types.SimpleNamespace(
     Vector3D=lambda: types.SimpleNamespace(),
 )
 sys.modules.setdefault("carla", fake_carla)
-sys.modules.setdefault(
-    "cv2",
-    types.SimpleNamespace(COLOR_BGR2RGB=0, cvtColor=lambda image, _code: image),
-)
+if importlib.util.find_spec("cv2") is None:
+    fake_cv2 = types.ModuleType("cv2")
+    fake_cv2.__spec__ = importlib.machinery.ModuleSpec("cv2", loader=None)
+    fake_cv2.COLOR_BGR2RGB = 0
+    fake_cv2.cvtColor = lambda image, _code: image
+    sys.modules.setdefault("cv2", fake_cv2)
 
 CARLAInterface = importlib.import_module("module.carla_interface").CARLAInterface
 
