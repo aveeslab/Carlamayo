@@ -173,9 +173,13 @@ class OfficialPIDFollower:
         y = float(target_local_xyz[1])
         distance_sq = x * x + y * y
         if distance_sq <= 1e-6 or x <= 0.0:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0
 
-        curvature = 2.0 * y / distance_sq
+        distance_m = float(np.sqrt(distance_sq))
+        response_distance_m = min(distance_m, cfg.PID_STEER_RESPONSE_MAX_LOOKAHEAD_M)
+        response_distance_sq = max(response_distance_m * response_distance_m, 1e-6)
+
+        curvature = 2.0 * y / response_distance_sq
         steer_angle_rad = float(np.arctan(cfg.PID_WHEELBASE_M * curvature))
         steer = float(
             np.clip(
@@ -184,7 +188,7 @@ class OfficialPIDFollower:
                 cfg.PID_MAX_STEER,
             )
         )
-        return steer, float(curvature), steer_angle_rad
+        return steer, float(curvature), steer_angle_rad, response_distance_m
 
     def compute_control(self, vehicle_tf, wp_ego, speed_mps):
         wp_local = alpamayo_to_carla_local(wp_ego)
@@ -207,7 +211,9 @@ class OfficialPIDFollower:
 
         target_wp = self._target_waypoint(vehicle_tf, target.local_xyz)
         longitudinal_control = self.pid.run_step(target_speed_kmh, target_wp)
-        steer, curvature, steer_angle_rad = self._pure_pursuit_steer(target.local_xyz)
+        steer, curvature, steer_angle_rad, response_distance_m = self._pure_pursuit_steer(
+            target.local_xyz
+        )
 
         debug = {
             "mode": "trajectory_pure_pursuit",
@@ -234,6 +240,7 @@ class OfficialPIDFollower:
             "traj_extent": traj_extent,
             "pure_pursuit_curvature": curvature,
             "pure_pursuit_steer_angle_rad": steer_angle_rad,
+            "pure_pursuit_response_distance_m": response_distance_m,
         }
         return (
             steer,
