@@ -23,6 +23,17 @@ def test_prepare_model_input_builds_expected_tensor_shapes_and_types():
     assert model_input["ego_history_rot"].shape == (1, 1, 16, 3, 3)
 
 
+
+
+def test_prepare_model_input_adds_carla_010_front_camera_indices():
+    images = np.zeros((4, 4, 2, 3, 3), dtype=np.uint8)
+    history_xyz = np.zeros((16, 3), dtype=np.float32)
+    history_rot = np.zeros((16, 3, 3), dtype=np.float32)
+
+    model_input = inference.prepare_model_input(images, history_xyz, history_rot)
+
+    assert model_input["camera_indices"].tolist() == [0, 1, 2, 6]
+
 @pytest.mark.parametrize(
     ("extra", "expected"),
     [

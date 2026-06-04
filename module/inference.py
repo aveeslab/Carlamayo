@@ -96,10 +96,12 @@ def prepare_model_input(images_array, history_xyz, history_rot):
     images = torch.from_numpy(images_array).permute(0, 1, 4, 2, 3).contiguous()
     hist_xyz = torch.from_numpy(history_xyz).float().unsqueeze(0).unsqueeze(0)
     hist_rot = torch.from_numpy(history_rot).float().unsqueeze(0).unsqueeze(0)
+    camera_indices = torch.tensor([0, 1, 2, 6], dtype=torch.long)
     return {
         "image_frames": images,
         "ego_history_xyz": hist_xyz,
         "ego_history_rot": hist_rot,
+        "camera_indices": camera_indices,
     }
 
 
