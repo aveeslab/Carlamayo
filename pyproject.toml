@@ -19,6 +19,7 @@ dependencies = [
   "seaborn>=0.13.2",
   "opencv-python-headless>=4.10",
   "alpamayo1-5",
+  "bitsandbytes>=0.43.0",
 ]
 
 [dependency-groups]
