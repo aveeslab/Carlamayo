@@ -1,131 +1,104 @@
 # Environment Setup
 
-This guide covers the required environments for CARLA data collection, Alpamayo inference, and closed-loop CARLA execution.
+This guide sets up CARLA 0.10.0 and Alpamayo 1.5 for data collection, open-loop inference, and closed-loop CARLA execution.
 
 ## Requirements
 
-| Requirement | Specification |
-|-------------|---------------|
-| **Python** | 3.12.x for Alpamayo/combined runs; CARLA 0.10 wheels include Python 3.10-3.12 |
-| **GPU** | NVIDIA GPU with ≥24 GB VRAM recommended for Alpamayo; 4-bit quantization can reduce memory usage |
-| **OS** | Linux tested |
-| **CARLA** | 0.10.0 |
-| **ffmpeg** | Recommended for VS Code/browser-compatible H.264 MP4 video output |
+| Component | Requirement |
+| --- | --- |
+| Python | 3.12.x for this repository environment |
+| CARLA | 0.10.0 Linux package |
+| GPU | NVIDIA GPU; full precision needs high VRAM, `--quantization` enables 4-bit loading |
+| Video tools | `ffmpeg` recommended for H.264/yuv420p MP4 output |
 
-> GPUs with less than 24 GB VRAM may encounter CUDA out-of-memory errors. The 4-bit quantization option can run with lower VRAM, depending on the full workload.
-
-## 0. Clone the Repository and Submodules
-
-Clone with the NVIDIA Alpamayo 1.5 submodule:
+## Clone with Alpamayo Submodule
 
 ```bash
 git clone --recurse-submodules https://github.com/aveeslab/Carlamayo.git
 cd Carlamayo
 ```
 
-If you already cloned the repository without submodules, initialize them from the repository root:
+If the repository was cloned without submodules:
 
 ```bash
 git submodule update --init --recursive
 ```
 
-The Alpamayo source remains in `third_party/alpamayo1.5` as a submodule. This repository does not vendor a copied `src/alpamayo1_5` tree.
+Alpamayo source lives in `third_party/alpamayo1.5/`; this repository does not vendor a copied source tree.
 
-## 1. CARLA Environment Setup
+## Install CARLA 0.10.0
 
-Use this environment for CARLA and data collection.
-
-### 1.1 Install and run CARLA 0.10.0
+Unpack CARLA so the root contains `CarlaUnreal.sh` and `PythonAPI/`. The default expected root is:
 
 ```bash
-# CARLA 0.10.0 is expected to be unpacked at ~/Carla-0.10.0.
-# Start it from the repository root with offscreen rendering:
+~/Carla-0.10.0
+```
+
+If CARLA is elsewhere, export the root before starting CARLA or running Python scripts:
+
+```bash
+export CARLA_010_ROOT=/path/to/Carla-0.10.0
+```
+
+Start CARLA 0.10.0 offscreen from the repository root:
+
+```bash
 ./scripts/start_carla_010.sh
 ```
 
-> Do not add `-quality-level=Low`; low-quality rendering can make error.
+The wrapper launches `CarlaUnreal.sh -RenderOffScreen`. Do not add `-quality-level=Low`; this setup rejects quality-level arguments because low-quality rendering can degrade camera inputs.
 
-If your CARLA archive extracts into a nested package directory, move or symlink the CARLA root so that `~/Carla-0.10.0` contains `CarlaUnreal.sh` and `PythonAPI/`.
+## Create the Python Environment
 
-### 1.2 Create a CARLA Python environment
-
-From the repository root, install `requirements-carla.txt`; it pins `carla==0.10.0` to match the CARLA server.
+Install the project and development dependencies with `uv`:
 
 ```bash
-python3.10 -m venv venv-carla
-source venv-carla/bin/activate
-pip install -r requirements-carla.txt
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv sync --group dev
 ```
 
+Install the CARLA 0.10.0 Python wheel that matches Python 3.12:
 
-### 1.3 Install ffmpeg for compatible MP4 output
+```bash
+export CARLA_010_ROOT=${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
+uv pip install --no-deps "$CARLA_010_ROOT/PythonAPI/carla/dist/carla-0.10.0-cp312-cp312-linux_x86_64.whl"
+```
 
-The inference scripts can write an OpenCV fallback video directly, but VS Code and browser-based players usually require H.264/yuv420p MP4. Install `ffmpeg` so videos are automatically transcoded to that compatible format:
+If the wheel filename differs, choose the `cp312` wheel from `$CARLA_010_ROOT/PythonAPI/carla/dist/`.
+
+## Hugging Face Access
+
+Request access to:
+
+- [PhysicalAI-Autonomous-Vehicles Dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
+- [Alpamayo Model Weights](https://huggingface.co/nvidia/Alpamayo-1.5-10B)
+
+Authenticate before inference:
+
+```bash
+uv pip install huggingface_hub
+huggingface-cli login
+```
+
+Alternatively, set `HF_TOKEN` or `HUGGING_FACE_HUB_TOKEN` in the shell that runs inference.
+
+## Optional Video Tooling
+
+Install `ffmpeg` so OpenCV output is transcoded to browser-friendly H.264/yuv420p MP4:
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y ffmpeg
 ```
 
-## 2. Alpamayo Environment Setup
-
-Use this environment for model inference.
-
-### 2.1 Install `uv`
+## Smoke Checks
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"
+.venv/bin/python - <<'PY'
+import carla, torch
+print("carla", carla.__file__)
+print("cuda", torch.cuda.is_available(), torch.cuda.device_count())
+PY
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q tests
 ```
-
-### 2.2 Set up the environment
-
-From the repository root:
-
-```bash
-uv venv a1_5_venv --python 3.12
-source a1_5_venv/bin/activate
-uv sync --active
-python -m ensurepip --upgrade
-python -m pip install --no-deps -e third_party/alpamayo1.5
-python -m pip install -r requirements-alpamayo.txt
-```
-
-### 2.3 Authenticate with Hugging Face
-
-The model requires access to gated resources. Request access first:
-
-- [PhysicalAI-Autonomous-Vehicles Dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
-- [Alpamayo Model Weights](https://huggingface.co/nvidia/Alpamayo-1.5-10B)
-
-Then authenticate:
-
-```bash
-pip install huggingface_hub
-huggingface-cli login
-```
-
-Create or copy your token from: <https://huggingface.co/settings/tokens>
-
-## 3. Combined Closed-Loop Environment
-
-Closed-loop execution needs Alpamayo and CARLA Python packages in the same environment.
-
-From the repository root, install `requirements-carla.txt`; it pins `carla==0.10.0` to match the CARLA server.
-
-```bash
-uv venv a1_5_carla_venv --python 3.12
-source a1_5_carla_venv/bin/activate
-uv sync --active
-python -m ensurepip --upgrade
-python -m pip install --no-deps -e third_party/alpamayo1.5
-python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
-```
-
-If `agents.navigation.controller` is not found, set `CARLA_010_ROOT` to the directory that contains `PythonAPI/carla`:
-
-```bash
-export CARLA_010_ROOT=~/Carla-0.10.0
-```
-
-Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.

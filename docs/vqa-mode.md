@@ -1,47 +1,39 @@
 # Closed-Loop VQA Mode
 
-VQA mode asks Alpamayo a driving-scene question over the current CARLA camera frames. It is for visual question answering only; VQA does not produce trajectories, so the ego vehicle is held braked while this mode is active.
+VQA mode asks Alpamayo a driving-scene question over the current CARLA camera frames. It does not produce trajectories, so the ego vehicle is held braked while this mode is active.
 
-## Start CARLA
-
-Start CARLA before launching the integration script:
+## Start CARLA 0.10.0
 
 ```bash
+export CARLA_010_ROOT=${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
 ./scripts/start_carla_010.sh
 ```
 
-> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
-
-Set the CARLA PythonAPI root if it is not already configured:
-
-```bash
-export CARLA_010_ROOT=~/Carla-0.10.0
-```
+The wrapper launches `CarlaUnreal.sh -RenderOffScreen`. Do not pass `-quality-level=Low`.
 
 ## Run VQA Mode
 
 From the repository root:
 
 ```bash
-source a1_5_carla_venv/bin/activate
-python carlamayo_closed_loop.py --mode vqa --pygame-ui
+.venv/bin/python carlamayo_closed_loop.py --mode vqa --pygame-ui --device-map cuda:0
 ```
 
-This CARLA 0.10 branch always loads Alpamayo with 4-bit quantization; `--quantization` remains a false-by-default request flag for compatibility:
+Default model loading is full precision. Add `--quantization` only when you need 4-bit loading to reduce VRAM:
 
 ```bash
-python carlamayo_closed_loop.py --mode vqa --pygame-ui --quantization
+.venv/bin/python carlamayo_closed_loop.py --mode vqa --pygame-ui --quantization --device-map cuda:0
 ```
 
-You can also provide the first question on the command line:
+You can provide the first question on the command line:
 
 ```bash
-python carlamayo_closed_loop.py --mode vqa --pygame-ui \
-  --vqa-question "What traffic elements are visible?"
+.venv/bin/python carlamayo_closed_loop.py --mode vqa --pygame-ui \
+  --vqa-question "What traffic elements are visible?" \
+  --device-map cuda:0
 ```
 
-The pygame UI starts paused automatically so you can enter the first VQA question
-before the CARLA loop begins ticking.
+`--pygame-ui` starts paused automatically so you can enter the first VQA question before the CARLA loop begins ticking.
 
 ## Ask a Question
 
@@ -68,15 +60,12 @@ The answer is shown in the pygame panel and printed to the terminal.
 
 ```bash
 # Non-blocking inference worker.
-python carlamayo_closed_loop.py --mode vqa --pygame-ui --async
+.venv/bin/python carlamayo_closed_loop.py --mode vqa --pygame-ui --async --device-map cuda:0
 
 # Lower VRAM model loading.
-python carlamayo_closed_loop.py --mode vqa --pygame-ui --quantization
-
+.venv/bin/python carlamayo_closed_loop.py --mode vqa --pygame-ui --quantization --device-map cuda:0
 ```
 
 ## Output
 
-If video recording is enabled in `module/config.py`, the script writes:
-
-- `carla_alpamayo_closed_loop_result.mp4`
+If `SAVE_VIDEO=True` in `module/config.py`, the script writes `carla_alpamayo_closed_loop_result.mp4`.

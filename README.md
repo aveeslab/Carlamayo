@@ -1,93 +1,109 @@
-<div align="center">
-
 # CarlaMayo
 
-### NVIDIA Alpamayo 1.5 + CARLA Simulator
+NVIDIA Alpamayo 1.5 integrated with CARLA 0.10.0 for data collection, open-loop inference, and closed-loop driving.
 
 ![Closed-loop Demo](assets/carla_alpamayo_demo.gif)
 
 [![CI](https://github.com/aveeslab/Carlamayo/actions/workflows/ci.yml/badge.svg)](https://github.com/aveeslab/Carlamayo/actions/workflows/ci.yml)
 
-</div>
-
-> **📖 Please read the [Hugging Face Model Card](https://huggingface.co/nvidia/Alpamayo-1.5-10B) first.**
-> The model card contains model architecture, inputs/outputs, licensing, and tested hardware details. This repository focuses on CARLA setup, data collection, and open/closed-loop inference scripts.
+Before downloading weights or datasets, review the [Hugging Face model card](https://huggingface.co/nvidia/Alpamayo-1.5-10B) for architecture, inputs/outputs, hardware requirements, and license terms.
 
 ## Requirements
 
-| Requirement | Specification |
-|-------------|---------------|
-| **Python** | 3.12.x for Alpamayo/combined runs; CARLA 0.10 wheels include Python 3.10-3.12 |
-| **GPU** | NVIDIA GPU with ≥24 GB VRAM for Alpamayo, ≥6 GB VRAM for CARLA |
-| **OS** | Linux tested; other platforms unverified |
-| **CARLA** | 0.10.0 |
+| Component | Requirement |
+| --- | --- |
+| Python | 3.12.x for Alpamayo and combined CARLA runs |
+| CARLA | 0.10.0 Linux package with `CarlaUnreal.sh` |
+| GPU | NVIDIA GPU; full precision needs high VRAM, `--quantization` enables 4-bit loading |
+| OS | Linux tested |
 
-> ⚠️ GPUs with less than 24 GB VRAM will likely encounter CUDA out-of-memory errors for full-precision Alpamayo inference. The 4-bit quantization path can reduce memory usage.
+CARLA 0.10.0 is expected at `~/Carla-0.10.0` unless `CARLA_010_ROOT` points to another root. The root must contain `CarlaUnreal.sh` and `PythonAPI/`.
 
-## Installation
+## Quick Start
 
-Environment setup by following document:
-
-- [Environment Setup](docs/environment-setup.md)
-
-## Running Inference
-
-Data collection, open-loop inference, and closed-loop inference by following document:
-
-- [Data Collection and Inference](docs/inference-workflows.md)
-
-### Closed-Loop UI Modes
-
-The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
-`--mode`. See the mode-specific usage guides:
-
-- [Navigation Mode](docs/navigation-mode.md)
-- [VQA Mode](docs/vqa-mode.md)
-
-## Project Structure
-
-```
-<repo-root>/
-├── data_collect.py              # Collect synchronized CARLA camera/LiDAR/trajectory data.
-├── carlamayo_open_loop.py       # Run Alpamayo 1.5 inference on recorded CARLA data.
-├── carlamayo_closed_loop.py     # Run closed-loop CARLA control modes.
-├── module/                      # Shared CARLA, inference, control, UI, and visualization helpers.
-├── tests/                       # Simulator-free unit tests for lightweight helpers.
-├── docs/                        # Environment setup and workflow guides.
-├── assets/                      # README images and demo media.
-├── third_party/alpamayo1.5/     # NVIDIA Alpamayo 1.5 git submodule.
-├── .github/workflows/ci.yml     # Lightweight GitHub Actions test workflow.
-├── pyproject.toml               # Python project metadata and Ruff configuration.
-├── uv.lock                      # Locked uv dependency graph for reproducible installs.
-├── requirements-alpamayo.txt    # Additional Alpamayo runtime packages.
-└── requirements-carla.txt       # CARLA 0.10.0 data-collection/runtime packages.
+```bash
+git clone --recurse-submodules https://github.com/aveeslab/Carlamayo.git
+cd Carlamayo
+uv sync --group dev
+export CARLA_010_ROOT=~/Carla-0.10.0
+uv pip install --no-deps "$CARLA_010_ROOT/PythonAPI/carla/dist/carla-0.10.0-cp312-cp312-linux_x86_64.whl"
 ```
 
-Generated data and videos such as `carla_data/` and `carla_alpamayo_*.mp4` are ignored by git.
+Authenticate to Hugging Face before model inference:
+
+```bash
+uv pip install huggingface_hub
+huggingface-cli login
+```
+
+Start CARLA 0.10.0 offscreen from the repository root:
+
+```bash
+./scripts/start_carla_010.sh
+```
+
+Do not pass `-quality-level=Low`; low-quality rendering can degrade camera inputs and the wrapper rejects quality-level arguments.
+
+## Common Workflows
+
+Collect synchronized CARLA data:
+
+```bash
+.venv/bin/python data_collect.py
+```
+
+Run open-loop Alpamayo inference on `carla_data/`:
+
+```bash
+.venv/bin/python carlamayo_open_loop.py
+```
+
+Run closed-loop CARLA control:
+
+```bash
+.venv/bin/python carlamayo_closed_loop.py --device-map cuda:0
+```
+
+Default model loading is full precision. Use 4-bit quantization only when VRAM is limited:
+
+```bash
+.venv/bin/python carlamayo_closed_loop.py --quantization --device-map cuda:0
+```
+
+Closed-loop visualization videos include the projected predicted trajectory/path overlay and are written to `carla_alpamayo_closed_loop_result.mp4` when `SAVE_VIDEO=True` in `module/config.py`.
+
+## Project Layout
+
+```text
+.
+├── data_collect.py                 # CARLA camera/LiDAR/trajectory recording
+├── carlamayo_open_loop.py          # Alpamayo inference on recorded data
+├── carlamayo_closed_loop.py        # CARLA closed-loop control modes
+├── module/                         # CARLA, inference, control, UI, visualization helpers
+├── tests/                          # Lightweight pytest suite
+├── docs/                           # Setup and workflow guides
+├── assets/                         # Demo/media assets
+└── third_party/alpamayo1.5/         # NVIDIA Alpamayo 1.5 submodule
+```
+
+Generated outputs such as `carla_data/` and `carla_alpamayo_*.mp4` are ignored by git.
+
+## Development
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .venv/bin/python -m pytest -q tests
+uvx ruff check .
+```
+
+See `docs/environment-setup.md` for detailed environment setup and `docs/inference-workflows.md` for workflow-specific commands.
 
 ## Troubleshooting
 
-### Flash Attention issues
+- **CARLA launcher not found:** set `CARLA_010_ROOT` to the directory containing `CarlaUnreal.sh`.
+- **CARLA Python import fails:** install the Python 3.12 CARLA 0.10.0 wheel from `$CARLA_010_ROOT/PythonAPI/carla/dist/`.
+- **CUDA out of memory:** retry with `--quantization`, reduce concurrent GPU load, or use a larger GPU.
+- **Browser/VS Code cannot play MP4:** install `ffmpeg`; videos are transcoded to H.264/yuv420p when available.
 
-The model uses Flash Attention 2 by default. If you encounter compatibility issues, use PyTorch's scaled dot-product attention instead in the Alpamayo config:
+## License
 
-```python
-config.attn_implementation = "sdpa"
-```
-
-### CUDA out-of-memory errors
-
-If you encounter OOM errors:
-
-1. Try 4-bit quantization with `--quantization`.
-2. Ensure you have a GPU with enough VRAM for the selected precision and trajectory count.
-3. Keep `num_traj_samples` low on smaller GPUs.
-4. Close other GPU-intensive applications.
-
-## License and Third-Party Licenses
-
-Apache License 2.0 - see [LICENSE](LICENSE) for details.
-
-This repository does not vendor NVIDIA Alpamayo 1.5 source code directly. Alpamayo is linked as a git submodule under `third_party/alpamayo1.5` and is licensed separately under Apache License 2.0. See `third_party/alpamayo1.5/LICENSE`.
-
-NVIDIA Alpamayo 1.5 model weights are not redistributed by this repository and are not covered by this repository's Apache License 2.0. Review the [Hugging Face model card](https://huggingface.co/nvidia/Alpamayo-1.5-10B) for the model license and usage restrictions, including non-commercial restrictions where applicable.
+This repository is Apache License 2.0. NVIDIA Alpamayo 1.5 source is included as a submodule under `third_party/alpamayo1.5`; model weights are not redistributed. Review the upstream model and dataset license terms before use.

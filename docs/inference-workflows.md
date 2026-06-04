@@ -1,45 +1,42 @@
 # Data Collection and Inference Workflows
 
-This guide covers CARLA data collection, open-loop inference, and closed-loop inference.
+This guide covers CARLA 0.10.0 data collection, open-loop inference, and closed-loop inference.
 
-## 1. Data Collection
-
-Start CARLA first:
+## Start CARLA 0.10.0
 
 ```bash
+export CARLA_010_ROOT=${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
 ./scripts/start_carla_010.sh
 ```
 
-> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
+The wrapper uses `CarlaUnreal.sh -RenderOffScreen`. Do not add `-quality-level=Low`.
 
-Then run data collection from the repository root:
+## 1. Data Collection
 
 ```bash
-source venv-carla/bin/activate
-python data_collect.py
+.venv/bin/python data_collect.py
 ```
 
-Outputs:
+Outputs are written under `carla_data/`:
 
-- `carla_data/trajectory.json`
-- `carla_data/cam_*/<frame>.jpg`
-- `carla_data/lidar_top/<frame>.ply`
+- `trajectory.json`
+- `cam_*/<frame>.jpg`
+- `lidar_top/<frame>.ply`
 
-`data_collect.py` records only complete synchronous frames. Sensor messages are matched to the exact frame returned by `world.tick()` so camera/LiDAR files and trajectory poses remain aligned under slower Epic rendering or after map reloads.
+`data_collect.py` records only complete synchronous frames. Sensor messages are matched to the exact frame returned by `world.tick()` so camera, LiDAR, and trajectory data stay aligned.
 
 ## 2. Open-Loop Inference
 
-Run open-loop inference on collected CARLA data:
+Run Alpamayo on collected data:
 
 ```bash
-source a1_5_venv/bin/activate
-python carlamayo_open_loop.py
+.venv/bin/python carlamayo_open_loop.py
 ```
 
-Recommended 4-bit quantized mode (effective model loading is forced on this branch):
+Default model loading is full precision. Use 4-bit quantization only when VRAM is limited:
 
 ```bash
-python carlamayo_open_loop.py --quantization
+.venv/bin/python carlamayo_open_loop.py --quantization
 ```
 
 Output:
@@ -48,74 +45,51 @@ Output:
 
 ## 3. Closed-Loop Inference
 
-Before running, make sure CARLA is running:
+Set the CARLA PythonAPI root if it is not under `~/Carla-0.10.0`:
 
 ```bash
-./scripts/start_carla_010.sh
+export CARLA_010_ROOT=/path/to/Carla-0.10.0
 ```
 
-> Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
+`module/config.py` controls the map and recording defaults. Current defaults include:
 
-Set the CARLA PythonAPI path if needed:
+- `CARLA_MAP = "Town10HD_Opt"`
+- `SAVE_VIDEO = True`
+- `OUTPUT_VIDEO = "carla_alpamayo_closed_loop_result.mp4"`
+
+Run normal closed-loop control:
 
 ```bash
-export CARLA_010_ROOT=~/Carla-0.10.0
+.venv/bin/python carlamayo_closed_loop.py --device-map cuda:0
 ```
 
-or edit `module/config.py`:
-
-```python
-CARLA_AGENT_ROOT = "~/Carla-0.10.0"
-```
-
-The CARLA town/map is configured in `module/config.py` with `CARLA_MAP`; the
-closed-loop script does not expose a separate map CLI option.
-
-Run closed-loop inference from the repository root:
+Use 4-bit quantization for lower VRAM:
 
 ```bash
-source a1_5_carla_venv/bin/activate
-python carlamayo_closed_loop.py
+.venv/bin/python carlamayo_closed_loop.py --quantization --device-map cuda:0
 ```
 
-Optional pygame UI modes:
+Use async inference when you want the CARLA tick loop to continue while the model worker runs:
 
 ```bash
-# Normal closed-loop trajectory control with camera UI.
-python carlamayo_closed_loop.py --mode normal --pygame-ui
+.venv/bin/python carlamayo_closed_loop.py --async --device-map cuda:0
 ```
 
-When `--pygame-ui` is enabled, the loop starts paused automatically so you can
-enter navigation or VQA text before the first active tick.
+Closed-loop videos include the projected predicted trajectory/path overlay on the camera image and are written to:
 
-Mode-specific usage guides:
+- `carla_alpamayo_closed_loop_result.mp4`
+
+Mode-specific guides:
 
 - [Navigation Mode](navigation-mode.md)
 - [VQA Mode](vqa-mode.md)
 
-Recommended 4-bit quantized mode (effective model loading is forced on this branch):
-
-```bash
-python carlamayo_closed_loop.py --quantization
-```
-
-Optional async inference mode:
-
-```bash
-python carlamayo_closed_loop.py --async
-```
-
-Output:
-
-- `carla_alpamayo_closed_loop_result.mp4`
-
 ## 4. NVIDIA Original Test Script
 
-The original Alpamayo test script is provided by the submodule. It downloads example data and model weights. The model weights are large and may take time depending on network speed.
+The Alpamayo submodule includes the upstream test script. It downloads example data and model weights, so runtime depends on network speed and Hugging Face access.
 
 ```bash
-source a1_5_venv/bin/activate
-python third_party/alpamayo1.5/src/alpamayo1_5/test_inference.py
+.venv/bin/python third_party/alpamayo1.5/src/alpamayo1_5/test_inference.py
 ```
 
-To generate more trajectories and reasoning traces, increase `num_traj_samples` in that submodule script. Review the model card/license terms before downloading or using the model weights.
+Review the model card and license terms before downloading or using model weights.
