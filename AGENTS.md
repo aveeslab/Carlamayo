@@ -12,7 +12,7 @@
 - `python -m pytest -q tests` runs the local lightweight test suite.
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests` matches the CI test invocation.
 - `uvx ruff check .` runs Ruff linting using the repository line-length setting.
-- Runtime entry points are `python data_collect.py`, `python carlamayo_open_loop.py --help`, and `python carlamayo_closed_loop.py --mode normal|navigation|vqa ...`. CARLA 0.9.16 runtime dependencies are tracked separately in `requirements-carla.txt` and may require a Python/CARLA-specific wheel.
+- Runtime entry points are `python data_collect.py`, `python carlamayo_open_loop.py --help`, and `python carlamayo_closed_loop.py --mode normal|navigation|vqa ...`. CARLA 0.10.0 runtime dependencies are tracked separately in `requirements-carla.txt` and can use the local wheel in `~/Carla-0.10.0/PythonAPI/carla/dist/`.
 
 ## Coding Style & Naming Conventions
 Use Python with 4-space indentation and a 100-character line limit (`pyproject.toml`). Prefer clear snake_case for functions, variables, and module files; use PascalCase for classes. Keep simulator-specific constants centralized in `module/config.py` where practical. Avoid broad refactors when changing control or inference behavior.

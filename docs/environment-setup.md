@@ -6,10 +6,10 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 
 | Requirement | Specification |
 |-------------|---------------|
-| **Python** | 3.12.x for Alpamayo, 3.10.x for CARLA |
+| **Python** | 3.12.x for Alpamayo/combined runs; CARLA 0.10 wheels include Python 3.10-3.12 |
 | **GPU** | NVIDIA GPU with ≥24 GB VRAM recommended for Alpamayo; 4-bit quantization can reduce memory usage |
 | **OS** | Linux tested |
-| **CARLA** | 0.9.16 |
+| **CARLA** | 0.10.0 |
 | **ffmpeg** | Recommended for VS Code/browser-compatible H.264 MP4 video output |
 
 > GPUs with less than 24 GB VRAM may encounter CUDA out-of-memory errors. The 4-bit quantization option can run with lower VRAM, depending on the full workload.
@@ -35,22 +35,21 @@ The Alpamayo source remains in `third_party/alpamayo1.5` as a submodule. This re
 
 Use this environment for CARLA and data collection.
 
-### 1.1 Install and run CARLA 0.9.16
+### 1.1 Install and run CARLA 0.10.0
 
 ```bash
-mkdir -p ~/carla && cd ~/carla
-wget https://tiny.carla.org/carla-0-9-16-linux
-tar -xvzf carla-0-9-16-linux
-./CarlaUE4.sh -RenderOffScreen
+# CARLA 0.10.0 is expected to be unpacked at ~/Carla-0.10.0.
+# Start it from the repository root with offscreen rendering:
+./scripts/start_carla_010.sh
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can make error.
 
-If your CARLA archive extracts into a nested package directory, move or symlink the CARLA root so that `~/carla` contains `CarlaUE4.sh` and `PythonAPI/`.
+If your CARLA archive extracts into a nested package directory, move or symlink the CARLA root so that `~/Carla-0.10.0` contains `CarlaUnreal.sh` and `PythonAPI/`.
 
 ### 1.2 Create a CARLA Python environment
 
-From the repository root, install `requirements-carla.txt`; it pins `carla==0.9.16` to match the CARLA server.
+From the repository root, install `requirements-carla.txt`; it pins `carla==0.10.0` to match the CARLA server.
 
 ```bash
 python3.10 -m venv venv-carla
@@ -112,7 +111,7 @@ Create or copy your token from: <https://huggingface.co/settings/tokens>
 
 Closed-loop execution needs Alpamayo and CARLA Python packages in the same environment.
 
-From the repository root, install `requirements-carla.txt`; it pins `carla==0.9.16` to match the CARLA server.
+From the repository root, install `requirements-carla.txt`; it pins `carla==0.10.0` to match the CARLA server.
 
 ```bash
 uv venv a1_5_carla_venv --python 3.12
@@ -123,10 +122,10 @@ python -m pip install --no-deps -e third_party/alpamayo1.5
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
 
-If `agents.navigation.controller` is not found, set `CARLA_ROOT` to the directory that contains `PythonAPI/carla`:
+If `agents.navigation.controller` is not found, set `CARLA_010_ROOT` to the directory that contains `PythonAPI/carla`:
 
 ```bash
-export CARLA_ROOT=~/carla
+export CARLA_010_ROOT=~/Carla-0.10.0
 ```
 
 Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.

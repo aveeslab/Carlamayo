@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from module import config as cfg
+from module.model_quantization import resolve_effective_quantization
 from module.open_loop_dataset import (
     load_front_camera_image,
     load_open_loop_arrays,
@@ -40,7 +41,8 @@ def parse_args():
         "--quantization",
         dest="use_quantization",
         action="store_true",
-        help="Use 4-bit quantized model instead of the default full-precision model.",
+        default=False,
+        help="Request 4-bit quantized loading; this CARLA 0.10 branch forces quantization at model load time.",
     )
     parser.add_argument(
         "--device-map",
@@ -108,12 +110,17 @@ def load_open_loop_model(use_quantization, device_map, cuda_linalg_library):
 
 def main():
     args = parse_args()
+    quantization = resolve_effective_quantization(args.use_quantization)
 
     print("=" * 60)
     print("CARLA -> Alpamayo 1.5 Open-Loop Inference")
     print("=" * 60)
     print(f"Data root: {args.data_root}")
-    print(f"Quantization: {'ON (4-bit)' if args.use_quantization else 'OFF (full-precision)'}")
+    print(
+        "Quantization: "
+        f"{'ON (4-bit)' if quantization.effective else 'OFF (full-precision)'}"
+        f" (requested={quantization.requested}, forced={quantization.forced})"
+    )
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
 
@@ -129,7 +136,7 @@ def main():
 
     print("\nLoading model...")
     model, processor = load_open_loop_model(
-        args.use_quantization,
+        quantization.effective,
         args.device_map,
         args.cuda_linalg_library,
     )

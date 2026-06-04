@@ -20,13 +20,10 @@ def _resolve_vehicle_pid_controller():
     except ImportError:
         pass
 
-    candidate_roots = []
-    for env_key in ("CARLA_ROOT", "CARLA_HOME"):
-        v = os.environ.get(env_key)
-        if v:
-            candidate_roots.append(os.path.expanduser(v))
-
-    candidate_roots.append(os.path.expanduser(cfg.CARLA_AGENT_ROOT))
+    candidate_roots = [os.path.expanduser(cfg.CARLA_AGENT_ROOT)]
+    carla_010_root = os.environ.get("CARLA_010_ROOT")
+    if carla_010_root:
+        candidate_roots.insert(0, os.path.expanduser(carla_010_root))
 
     for root in candidate_roots:
         agents_parent = os.path.abspath(os.path.join(root, "PythonAPI", "carla"))
@@ -38,8 +35,8 @@ def _resolve_vehicle_pid_controller():
         return _VehiclePIDController
     except ImportError as e:
         raise ImportError(
-            "VehiclePIDController not found. Set CARLA_ROOT or add "
-            "'<CARLA_ROOT>/PythonAPI/carla' to PYTHONPATH."
+            "VehiclePIDController not found. Set CARLA_010_ROOT or add "
+            "'<CARLA_010_ROOT>/PythonAPI/carla' to PYTHONPATH."
         ) from e
 
 

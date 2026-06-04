@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from module import config as cfg
+from module.model_quantization import resolve_effective_quantization
 from module.navigation_control import NavigationControlState
 from module.pid_controller import OfficialPIDFollower
 from module.respawn_control import RespawnMonitor
@@ -79,7 +80,7 @@ def parse_args():
         dest="quantization",
         action="store_true",
         default=False,
-        help="Use 4-bit quantized model instead of the default full-precision model.",
+        help="Request 4-bit quantized loading; this CARLA 0.10 branch forces quantization at model load time.",
     )
     parser.add_argument(
         "--async",
@@ -155,11 +156,16 @@ def parse_args():
 def main():
     args = parse_args()
     inference_interval_sec = 1.0
+    quantization = resolve_effective_quantization(args.quantization)
 
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
     print("=" * 60)
-    print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
+    print(
+        "Quantization: "
+        f"{'ON (4-bit)' if quantization.effective else 'OFF (full-precision)'}"
+        f" (requested={quantization.requested}, forced={quantization.forced})"
+    )
     print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
     print(f"Inference mode: {args.mode}")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
@@ -185,7 +191,7 @@ def main():
 
     print("\nLoading model...")
     configure_cuda_linalg_library(args.cuda_linalg_library)
-    model, processor = load_model(args.quantization, device_map=args.device_map)
+    model, processor = load_model(quantization.effective, device_map=args.device_map)
     print("Model loaded!")
     print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 

@@ -1,6 +1,6 @@
 numpy>=1.26
 opencv-python>=4.10
 pygame>=2.6
-# Recommended for CARLA 0.9.16. If the PyPI wheel is unavailable for your
-# Python/CARLA combination, install the matching local CARLA wheel instead.
-carla==0.9.16
+# CARLA 0.10.0 supports Python 3.8-3.12. If the PyPI wheel is unavailable,
+# install the matching local wheel from ~/Carla-0.10.0/PythonAPI/carla/dist/.
+carla==0.10.0

@@ -13,7 +13,7 @@ def test_runtime_dimensions_match_alpamayo_camera_history_contract():
 
 
 def test_output_paths_and_map_defaults_are_public_run_defaults():
-    assert cfg.CARLA_MAP == "Town03"
+    assert cfg.CARLA_MAP == "Town10HD_Opt"
     assert cfg.OUTPUT_VIDEO.endswith(".mp4")
     assert Path(cfg.OUTPUT_VIDEO).name == cfg.OUTPUT_VIDEO
     assert cfg.VIDEO_FPS > 0
@@ -33,3 +33,9 @@ def test_npc_exclusion_keywords_are_normalized_strings():
     assert cfg.NPC_EXCLUDED_VEHICLE_KEYWORDS
     assert all(keyword == keyword.lower() for keyword in cfg.NPC_EXCLUDED_VEHICLE_KEYWORDS)
     assert all(keyword.strip() == keyword for keyword in cfg.NPC_EXCLUDED_VEHICLE_KEYWORDS)
+
+def test_carla_010_defaults_point_to_local_install_and_available_map():
+    assert cfg.CARLA_VERSION == "0.10.0"
+    assert cfg.CARLA_AGENT_ROOT.endswith("Carla-0.10.0")
+    assert cfg.CARLA_MAP == "Town10HD_Opt"
+    assert cfg.EGO_VEHICLE_BLUEPRINT.startswith("vehicle.")

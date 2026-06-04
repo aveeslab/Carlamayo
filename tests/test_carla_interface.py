@@ -12,6 +12,10 @@ fake_carla = types.SimpleNamespace(
     Vector3D=lambda: types.SimpleNamespace(),
 )
 sys.modules.setdefault("carla", fake_carla)
+sys.modules.setdefault(
+    "cv2",
+    types.SimpleNamespace(COLOR_BGR2RGB=0, cvtColor=lambda image, _code: image),
+)
 
 CARLAInterface = importlib.import_module("module.carla_interface").CARLAInterface
 
@@ -96,3 +100,38 @@ def test_cleanup_reports_recoverable_teardown_failures(capsys):
     assert "Warning: failed to destroy sensor cam_front_wide" in output
     assert "Warning: failed to destroy ego vehicle" in output
     assert "Warning: failed to restore world asynchronous mode" in output
+
+
+def test_select_vehicle_blueprint_falls_back_when_preferred_id_is_missing():
+    carla_interface = importlib.import_module("module.carla_interface")
+
+    class FakeBlueprint:
+        def __init__(self, blueprint_id):
+            self.id = blueprint_id
+            self.attrs = {"number_of_wheels": "4"}
+
+        def has_attribute(self, name):
+            return name in self.attrs or name == "role_name"
+
+        def get_attribute(self, name):
+            return self.attrs[name]
+
+        def set_attribute(self, name, value):
+            self.attrs[name] = value
+
+    class FakeBlueprintLibrary:
+        def find(self, blueprint_id):
+            raise RuntimeError(f"missing {blueprint_id}")
+
+        def filter(self, pattern):
+            assert pattern == "vehicle.*"
+            return [FakeBlueprint("vehicle.lincoln.mkz"), FakeBlueprint("vehicle.firetruck")]
+
+    selected = carla_interface.select_vehicle_blueprint(
+        FakeBlueprintLibrary(),
+        preferred_id="vehicle.tesla.model3",
+        role_name="hero",
+    )
+
+    assert selected.id == "vehicle.lincoln.mkz"
+    assert selected.attrs["role_name"] == "hero"

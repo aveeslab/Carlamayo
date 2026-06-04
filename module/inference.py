@@ -14,6 +14,7 @@ from alpamayo1_5 import helper
 
 from . import config as cfg
 from .alpamayo_compat import patch_legacy_hydra_targets
+from .model_quantization import resolve_effective_quantization
 from .vlm_generate_optimization import VlmGenerateTiming, optimized_vlm_generate
 
 patch_legacy_hydra_targets()
@@ -59,7 +60,8 @@ def configure_cuda_linalg_library(library: str | None):
 
 def load_model(use_quantization: bool, device_map="auto"):
     """Load Alpamayo model and processor."""
-    if use_quantization:
+    quantization = resolve_effective_quantization(use_quantization)
+    if quantization.effective:
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.bfloat16,

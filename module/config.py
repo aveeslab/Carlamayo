@@ -2,9 +2,10 @@
 
 import os
 
-# User Config (Edit for your local CARLA version/layout)
-# Used only when CARLA_ROOT/CARLA_HOME env vars are not set.
-CARLA_AGENT_ROOT = os.path.expanduser("~/carla")
+# User Config (Edit for your local CARLA 0.10 version/layout)
+# Use CARLA_010_ROOT to override without accidentally reusing a 0.9 CARLA_ROOT.
+CARLA_VERSION = "0.10.0"
+CARLA_AGENT_ROOT = os.path.expanduser("~/Carla-0.10.0")
 
 # Alpamayo Configuration
 NUM_CAMERAS = 4
@@ -25,7 +26,8 @@ PYGAME_WINDOW_WIDTH = 1280
 PYGAME_WINDOW_HEIGHT = 900
 
 # CARLA Configuration
-CARLA_MAP = "Town03"  # Urban-style map
+CARLA_MAP = "Town10HD_Opt"  # Available in the local CARLA 0.10.0 install.
+EGO_VEHICLE_BLUEPRINT = "vehicle.lincoln.mkz"
 NPC_VEHICLE_COUNT = 50
 NPC_WALKER_COUNT = 50
 NPC_EXCLUDED_VEHICLE_KEYWORDS = (

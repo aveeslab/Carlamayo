@@ -24,6 +24,36 @@ def is_allowed_npc_vehicle_blueprint(blueprint):
     return not any(keyword in blueprint_id for keyword in cfg.NPC_EXCLUDED_VEHICLE_KEYWORDS)
 
 
+def _set_blueprint_role_name(blueprint, role_name):
+    if role_name and blueprint.has_attribute("role_name"):
+        blueprint.set_attribute("role_name", role_name)
+
+
+def select_vehicle_blueprint(blueprint_library, preferred_id=None, role_name=None):
+    """Return a CARLA vehicle blueprint, falling back when 0.9-era IDs are absent."""
+
+    preferred_id = preferred_id or cfg.EGO_VEHICLE_BLUEPRINT
+    if preferred_id:
+        try:
+            blueprint = blueprint_library.find(preferred_id)
+            _set_blueprint_role_name(blueprint, role_name)
+            return blueprint
+        except (IndexError, RuntimeError, ValueError):
+            pass
+
+    candidates = [
+        blueprint
+        for blueprint in blueprint_library.filter("vehicle.*")
+        if is_allowed_npc_vehicle_blueprint(blueprint)
+    ]
+    if not candidates:
+        raise RuntimeError("No passenger-car CARLA vehicle blueprint is available.")
+
+    blueprint = candidates[0]
+    _set_blueprint_role_name(blueprint, role_name)
+    return blueprint
+
+
 class CARLAInterface:
     """Interface for CARLA simulation."""
 
@@ -183,8 +213,11 @@ class CARLAInterface:
 
     def spawn_ego_vehicle(self):
         bp_lib = self.world.get_blueprint_library()
-        vehicle_bp = bp_lib.find("vehicle.tesla.model3")
-        vehicle_bp.set_attribute("role_name", "hero")
+        vehicle_bp = select_vehicle_blueprint(
+            bp_lib,
+            preferred_id=cfg.EGO_VEHICLE_BLUEPRINT,
+            role_name="hero",
+        )
         spawn_point = self._select_ego_spawn_point()
         print("Spawning ego vehicle...")
         self.ego_vehicle = self.world.spawn_actor(vehicle_bp, spawn_point)

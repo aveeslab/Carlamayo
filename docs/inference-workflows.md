@@ -7,8 +7,7 @@ This guide covers CARLA data collection, open-loop inference, and closed-loop in
 Start CARLA first:
 
 ```bash
-cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./scripts/start_carla_010.sh
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -37,7 +36,7 @@ source a1_5_venv/bin/activate
 python carlamayo_open_loop.py
 ```
 
-Optional 4-bit quantized mode:
+Recommended 4-bit quantized mode (effective model loading is forced on this branch):
 
 ```bash
 python carlamayo_open_loop.py --quantization
@@ -52,8 +51,7 @@ Output:
 Before running, make sure CARLA is running:
 
 ```bash
-cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./scripts/start_carla_010.sh
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -61,13 +59,13 @@ cd ~/carla
 Set the CARLA PythonAPI path if needed:
 
 ```bash
-export CARLA_ROOT=~/carla
+export CARLA_010_ROOT=~/Carla-0.10.0
 ```
 
 or edit `module/config.py`:
 
 ```python
-CARLA_AGENT_ROOT = "~/carla"
+CARLA_AGENT_ROOT = "~/Carla-0.10.0"
 ```
 
 The CARLA town/map is configured in `module/config.py` with `CARLA_MAP`; the
@@ -95,10 +93,10 @@ Mode-specific usage guides:
 - [Navigation Mode](navigation-mode.md)
 - [VQA Mode](vqa-mode.md)
 
-Optional 4-bit quantized mode:
+Recommended 4-bit quantized mode (effective model loading is forced on this branch):
 
 ```bash
-python carlamayo_open_loop.py --quantization
+python carlamayo_closed_loop.py --quantization
 ```
 
 Optional async inference mode:

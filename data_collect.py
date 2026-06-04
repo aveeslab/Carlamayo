@@ -7,6 +7,8 @@ import carla
 import cv2
 import numpy as np
 
+from module import config as cfg
+from module.carla_interface import select_vehicle_blueprint
 from module.data_collection import (
     collect_synchronous_sensor_frame,
     frame_file_path,
@@ -137,7 +139,7 @@ def main():
     try:
         client = carla.Client("localhost", 2000)
         client.set_timeout(20.0)
-        world = client.load_world("Town02")
+        world = client.load_world(cfg.CARLA_MAP)
         bp_lib = world.get_blueprint_library()
 
         if not os.path.exists(OUTPUT_DIR):
@@ -162,8 +164,11 @@ def main():
 
         # Ego Vehicle
         spawn_points = world.get_map().get_spawn_points()
-        vehicle_bp = bp_lib.find("vehicle.tesla.model3")
-        vehicle_bp.set_attribute("role_name", "hero")
+        vehicle_bp = select_vehicle_blueprint(
+            bp_lib,
+            preferred_id=cfg.EGO_VEHICLE_BLUEPRINT,
+            role_name="hero",
+        )
 
         ego_vehicle = None
         for _ in range(10):
@@ -182,16 +187,16 @@ def main():
         # Sensors
         sensor_queue = queue.Queue()
 
-        for name, cfg in SENSOR_CONFIGS.items():
+        for name, sensor_cfg in SENSOR_CONFIGS.items():
             cam_bp = bp_lib.find("sensor.camera.rgb")
             cam_bp.set_attribute("image_size_x", str(IMAGE_WIDTH))
             cam_bp.set_attribute("image_size_y", str(IMAGE_HEIGHT))
-            cam_bp.set_attribute("fov", str(cfg["fov"]))
+            cam_bp.set_attribute("fov", str(sensor_cfg["fov"]))
             cam_bp.set_attribute("sensor_tick", "0.0")
 
             transform = carla.Transform(
-                carla.Location(x=cfg["x"], y=cfg["y"], z=cfg["z"]),
-                carla.Rotation(pitch=cfg["pitch"], yaw=cfg["yaw"]),
+                carla.Location(x=sensor_cfg["x"], y=sensor_cfg["y"], z=sensor_cfg["z"]),
+                carla.Rotation(pitch=sensor_cfg["pitch"], yaw=sensor_cfg["yaw"]),
             )
 
             sensor = world.spawn_actor(cam_bp, transform, attach_to=ego_vehicle)

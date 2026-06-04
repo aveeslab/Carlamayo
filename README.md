@@ -17,10 +17,10 @@
 
 | Requirement | Specification |
 |-------------|---------------|
-| **Python** | 3.12.x for Alpamayo, 3.10.x for CARLA |
+| **Python** | 3.12.x for Alpamayo/combined runs; CARLA 0.10 wheels include Python 3.10-3.12 |
 | **GPU** | NVIDIA GPU with ≥24 GB VRAM for Alpamayo, ≥6 GB VRAM for CARLA |
 | **OS** | Linux tested; other platforms unverified |
-| **CARLA** | 0.9.16 |
+| **CARLA** | 0.10.0 |
 
 > ⚠️ GPUs with less than 24 GB VRAM will likely encounter CUDA out-of-memory errors for full-precision Alpamayo inference. The 4-bit quantization path can reduce memory usage.
 
@@ -60,7 +60,7 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 ├── pyproject.toml               # Python project metadata and Ruff configuration.
 ├── uv.lock                      # Locked uv dependency graph for reproducible installs.
 ├── requirements-alpamayo.txt    # Additional Alpamayo runtime packages.
-└── requirements-carla.txt       # CARLA 0.9.16 data-collection/runtime packages.
+└── requirements-carla.txt       # CARLA 0.10.0 data-collection/runtime packages.
 ```
 
 Generated data and videos such as `carla_data/` and `carla_alpamayo_*.mp4` are ignored by git.

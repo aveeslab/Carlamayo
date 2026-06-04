@@ -7,8 +7,7 @@ Navigation mode runs Alpamayo closed-loop trajectory generation with a runtime t
 Start CARLA before launching the integration script:
 
 ```bash
-cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./scripts/start_carla_010.sh
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -16,7 +15,7 @@ cd ~/carla
 Set the CARLA PythonAPI root if it is not already configured:
 
 ```bash
-export CARLA_ROOT=~/carla
+export CARLA_010_ROOT=~/Carla-0.10.0
 ```
 
 ## Run Navigation Mode
@@ -28,7 +27,7 @@ source a1_5_carla_venv/bin/activate
 python carlamayo_closed_loop.py --mode navigation --pygame-ui
 ```
 
-Closed-loop loading defaults to full precision. On lower-VRAM machines, add `--quantization`:
+This CARLA 0.10 branch always loads Alpamayo with 4-bit quantization; `--quantization` remains a false-by-default request flag for compatibility:
 
 ```bash
 python carlamayo_closed_loop.py --mode navigation --pygame-ui --quantization
