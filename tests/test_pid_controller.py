@@ -149,3 +149,30 @@ def test_pid_follower_uses_zero_steer_for_straight_trajectory(monkeypatch):
 
     assert (steer, throttle, brake) == pytest.approx((0.0, 0.2, 0.0))
     assert debug["target_local_xy"] == pytest.approx([4.0, 0.0])
+
+
+def test_pid_follower_uses_more_responsive_steer_normalization(monkeypatch):
+    _install_fakes(monkeypatch)
+    follower = pid_controller.OfficialPIDFollower(FakeWorld(RaisingMap()), FakeVehicle())
+    vehicle_tf = FakeTransform(FakeLocation(0.0, 0.0, 0.0))
+    wp_ego = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [5.0, -2.0, 0.0],
+            [9.0, -2.0, 0.0],
+        ],
+        dtype=np.float64,
+    )
+
+    steer, _throttle, _brake, _debug = follower.compute_control(vehicle_tf, wp_ego, speed_mps=0.0)
+
+    expected_local = np.array([3.0 + 1.0 / math.sqrt(2.0), 1.0 / math.sqrt(2.0)])
+    expected_curvature = 2.0 * expected_local[1] / float(np.dot(expected_local, expected_local))
+    expected_angle = math.atan(cfg.PID_WHEELBASE_M * expected_curvature)
+    old_normalization_steer = expected_angle / 0.7
+    responsive_steer = expected_angle / 0.45
+
+    assert cfg.PID_STEER_NORMALIZATION_RAD == pytest.approx(0.45)
+    assert steer == pytest.approx(responsive_steer)
+    assert abs(steer) > abs(old_normalization_steer) * 1.5
