@@ -191,8 +191,9 @@ def test_pid_follower_boosts_small_lateral_offsets_at_long_lookahead(monkeypatch
         _expected_pure_pursuit_steer(target_local[:2])
     )
 
-    assert cfg.PID_STEER_RESPONSE_MAX_LOOKAHEAD_M == pytest.approx(2.0)
+    assert cfg.PID_STEER_RESPONSE_MAX_LOOKAHEAD_M == pytest.approx(2.5)
     assert response_distance_m == pytest.approx(expected_response_m)
     assert curvature == pytest.approx(expected_curvature)
     assert steer == pytest.approx(expected_steer)
-    assert abs(steer) > abs(old_steer) * 1.9
+    assert abs(steer) > abs(old_steer) * 2.3
+    assert abs(steer) < abs(old_steer) * 2.8
