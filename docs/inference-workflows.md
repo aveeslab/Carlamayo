@@ -5,11 +5,11 @@ This guide covers CARLA 0.10.0 data collection, open-loop inference, and closed-
 ## Start CARLA 0.10.0
 
 ```bash
-export CARLA_010_ROOT=${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
-./scripts/start_carla_010.sh
+cd ${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
+./CarlaUnreal.sh -RenderOffScreen
 ```
 
-The wrapper uses `CarlaUnreal.sh -RenderOffScreen`. Do not add `-quality-level=Low`.
+Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 ## 1. Data Collection
 

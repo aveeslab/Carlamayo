@@ -40,13 +40,14 @@ If CARLA is elsewhere, export the root before starting CARLA or running Python s
 export CARLA_010_ROOT=/path/to/Carla-0.10.0
 ```
 
-Start CARLA 0.10.0 offscreen from the repository root:
+Start CARLA 0.10.0 from its install directory:
 
 ```bash
-./scripts/start_carla_010.sh
+cd ${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
+./CarlaUnreal.sh -RenderOffScreen
 ```
 
-The wrapper launches `CarlaUnreal.sh -RenderOffScreen`. Do not add `-quality-level=Low`; this setup rejects quality-level arguments because low-quality rendering can degrade camera inputs.
+Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 ## Create the Python Environment
 

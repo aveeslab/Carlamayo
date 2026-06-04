@@ -5,11 +5,11 @@ VQA mode asks Alpamayo a driving-scene question over the current CARLA camera fr
 ## Start CARLA 0.10.0
 
 ```bash
-export CARLA_010_ROOT=${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
-./scripts/start_carla_010.sh
+cd ${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
+./CarlaUnreal.sh -RenderOffScreen
 ```
 
-The wrapper launches `CarlaUnreal.sh -RenderOffScreen`. Do not pass `-quality-level=Low`.
+Do not pass `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 ## Run VQA Mode
 

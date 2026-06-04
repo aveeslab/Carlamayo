@@ -36,13 +36,14 @@ uv pip install huggingface_hub
 huggingface-cli login
 ```
 
-Start CARLA 0.10.0 offscreen from the repository root:
+Start CARLA 0.10.0 from its install directory:
 
 ```bash
-./scripts/start_carla_010.sh
+cd ${CARLA_010_ROOT:-$HOME/Carla-0.10.0}
+./CarlaUnreal.sh -RenderOffScreen
 ```
 
-Do not pass `-quality-level=Low`; low-quality rendering can degrade camera inputs and the wrapper rejects quality-level arguments.
+Do not pass `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
 ## Common Workflows
 
