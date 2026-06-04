@@ -1,8 +1,10 @@
+import math
 import types
 
 import numpy as np
 import pytest
 
+from module import config as cfg
 from module import pid_controller
 
 
@@ -25,24 +27,30 @@ class FakeTransform:
         self.location = location or FakeLocation()
         self.rotation = rotation or FakeRotation()
 
-    def transform(self, location):
+    def transform(self, loc):
         return FakeLocation(
-            self.location.x + location.x,
-            self.location.y + location.y,
-            self.location.z + location.z,
+            self.location.x + loc.x,
+            self.location.y + loc.y,
+            self.location.z + loc.z,
         )
+
+    def get_forward_vector(self):
+        return types.SimpleNamespace(x=1.0, y=0.0, z=0.0)
 
     def get_right_vector(self):
         return types.SimpleNamespace(x=0.0, y=1.0, z=0.0)
 
 
 class RecordingVehiclePIDController:
-    def __init__(self, *_args, **_kwargs):
+    def __init__(self, *args, **kwargs):
+        self.last_speed = None
         self.last_waypoint = None
 
-    def run_step(self, _target_speed, waypoint):
+    def run_step(self, target_speed, waypoint):
+        self.last_speed = target_speed
         self.last_waypoint = waypoint
-        return types.SimpleNamespace(steer=0.1, throttle=0.2, brake=0.0)
+        # The follower should replace this lateral output with trajectory pure pursuit.
+        return types.SimpleNamespace(steer=-0.7, throttle=0.2, brake=0.0)
 
 
 class RaisingMap:
@@ -51,9 +59,7 @@ class RaisingMap:
 
     def get_waypoint(self, *_args, **_kwargs):
         self.called = True
-        raise AssertionError(
-            "PID should not project raw Alpamayo targets to CARLA map waypoints"
-        )
+        raise AssertionError("controller should not project raw Alpamayo targets to map waypoints")
 
 
 class FakeVehicle:
@@ -72,10 +78,8 @@ class FakeWorld:
         return self.fake_map
 
 
-def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypatch):
-    fake_map = RaisingMap()
+def _install_fakes(monkeypatch):
     fake_carla = types.SimpleNamespace(
-        LaneType=types.SimpleNamespace(Driving=object()),
         Location=FakeLocation,
         Rotation=FakeRotation,
         Transform=FakeTransform,
@@ -87,13 +91,18 @@ def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypa
         lambda: RecordingVehiclePIDController,
     )
 
+
+def test_pid_follower_uses_interpolated_trajectory_lookahead_without_map_projection(monkeypatch):
+    _install_fakes(monkeypatch)
+    fake_map = RaisingMap()
     follower = pid_controller.OfficialPIDFollower(FakeWorld(fake_map), FakeVehicle())
     vehicle_tf = FakeTransform(FakeLocation(10.0, 20.0, 0.0))
     wp_ego = np.array(
         [
             [1.0, 0.0, 0.0],
-            [5.0, 0.0, 0.0],
-            [9.0, 0.0, 0.0],
+            [3.0, 0.0, 0.0],
+            [5.0, -2.0, 0.0],
+            [9.0, -2.0, 0.0],
         ],
         dtype=np.float64,
     )
@@ -104,11 +113,39 @@ def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypa
         speed_mps=0.0,
     )
 
+    expected_local = np.array([3.0 + 1.0 / math.sqrt(2.0), 1.0 / math.sqrt(2.0)])
+    expected_curvature = 2.0 * expected_local[1] / float(np.dot(expected_local, expected_local))
+    expected_angle = math.atan(cfg.PID_WHEELBASE_M * expected_curvature)
+    expected_steer = np.clip(
+        expected_angle / cfg.PID_STEER_NORMALIZATION_RAD,
+        -cfg.PID_MAX_STEER,
+        cfg.PID_MAX_STEER,
+    )
+
     assert fake_map.called is False
-    assert (steer, throttle, brake) == pytest.approx((0.1, 0.2, 0.0))
+    assert (throttle, brake) == pytest.approx((0.2, 0.0))
+    assert steer == pytest.approx(expected_steer)
+    assert steer > 0.0
+    assert debug["mode"] == "trajectory_pure_pursuit"
+    assert debug["target_idx"] == 2
+    assert debug["target_local_xy"] == pytest.approx(expected_local.tolist())
+    assert debug["lookahead_path_m"] == pytest.approx(4.0)
     target_loc = follower.pid.last_waypoint.transform.location
-    assert target_loc.x == pytest.approx(15.0)
-    assert target_loc.y == pytest.approx(20.0)
-    assert debug["target_idx"] == 1
-    assert debug["target_raw_xy"] == pytest.approx([15.0, 20.0])
+    assert target_loc.x == pytest.approx(10.0 + expected_local[0])
+    assert target_loc.y == pytest.approx(20.0 + expected_local[1])
     assert debug["target_projected_to_road"] is False
+
+
+def test_pid_follower_uses_zero_steer_for_straight_trajectory(monkeypatch):
+    _install_fakes(monkeypatch)
+    follower = pid_controller.OfficialPIDFollower(FakeWorld(RaisingMap()), FakeVehicle())
+    vehicle_tf = FakeTransform(FakeLocation(10.0, 20.0, 0.0))
+    wp_ego = np.array(
+        [[1.0, 0.0, 0.0], [5.0, 0.0, 0.0], [9.0, 0.0, 0.0]],
+        dtype=np.float64,
+    )
+
+    steer, throttle, brake, debug = follower.compute_control(vehicle_tf, wp_ego, speed_mps=0.0)
+
+    assert (steer, throttle, brake) == pytest.approx((0.0, 0.2, 0.0))
+    assert debug["target_local_xy"] == pytest.approx([4.0, 0.0])
