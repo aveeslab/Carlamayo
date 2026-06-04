@@ -1,4 +1,4 @@
-"""Tests for CARLA 0.10 model-loading quantization policy."""
+"""Tests for CLI-controlled Alpamayo model-loading quantization policy."""
 
 import importlib
 import sys
@@ -30,12 +30,12 @@ def _quantization_arg_kwargs(script_path):
     raise AssertionError(f"{script_path} does not define --quantization")
 
 
-def test_effective_quantization_is_forced_even_when_cli_default_is_false():
+def test_effective_quantization_follows_cli_default_false():
     decision = resolve_effective_quantization(requested=False)
 
     assert decision.requested is False
-    assert decision.effective is True
-    assert decision.forced is True
+    assert decision.effective is False
+    assert decision.forced is False
 
 
 def test_effective_quantization_preserves_explicit_true_request():
@@ -63,7 +63,7 @@ def test_cli_quantization_request_defaults_remain_false():
         assert kwargs["default"] is False
 
 
-def test_load_model_forces_quantized_pretrained_call_when_request_default_is_false(monkeypatch):
+def test_load_model_uses_unquantized_pretrained_call_when_request_default_is_false(monkeypatch):
     calls = []
 
     class FakeBitsAndBytesConfig:
@@ -106,6 +106,6 @@ def test_load_model_forces_quantized_pretrained_call_when_request_default_is_fal
     assert processor == ("processor", FakeAlpamayo.tokenizer)
     assert len(calls) == 1
     _, kwargs = calls[0]
-    assert isinstance(kwargs["quantization_config"], FakeBitsAndBytesConfig)
-    assert kwargs["quantization_config"].kwargs["load_in_4bit"] is True
+    assert "quantization_config" not in kwargs
+    assert kwargs["dtype"] is not None
     assert kwargs["device_map"] == "auto"

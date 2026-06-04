@@ -80,7 +80,7 @@ def parse_args():
         dest="quantization",
         action="store_true",
         default=False,
-        help="Request 4-bit quantized loading; this CARLA 0.10 branch forces quantization at model load time.",
+        help="Load the model with 4-bit quantization. Default keeps full precision.",
     )
     parser.add_argument(
         "--async",

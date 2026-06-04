@@ -1,4 +1,4 @@
-"""Model-loading quantization policy for the CARLA 0.10 branch."""
+"""Model-loading quantization policy shared by Alpamayo entrypoints."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ class QuantizationDecision:
 
 
 def resolve_effective_quantization(requested: bool) -> QuantizationDecision:
-    """Force 4-bit loading while preserving the CLI default as a requested value."""
+    """Resolve the effective model-loading quantization from the CLI request."""
 
     requested_bool = bool(requested)
     return QuantizationDecision(
         requested=requested_bool,
-        effective=True,
-        forced=not requested_bool,
+        effective=requested_bool,
+        forced=False,
     )
