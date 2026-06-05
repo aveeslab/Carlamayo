@@ -1,6 +1,8 @@
 """Modular entrypoint for CARLA closed-loop control with Alpamayo."""
 
 import argparse
+import importlib
+import inspect
 import os
 import queue
 import threading
@@ -48,6 +50,68 @@ def format_vqa_answer_preview(answer, limit=160):
     return f"{answer[:limit]}{suffix}"
 
 
+def create_controller(controller_name, world, vehicle):
+    """Build the selected closed-loop trajectory follower."""
+
+    if controller_name == "pid":
+        return OfficialPIDFollower(world, vehicle)
+
+    if controller_name == "mpc":
+        mpc_module = importlib.import_module("module.mpc_controller")
+        controller_cls = None
+        for attr_name in ("MPCFollower", "MPCController"):
+            controller_cls = getattr(mpc_module, attr_name, None)
+            if controller_cls is not None:
+                break
+        if controller_cls is None:
+            raise AttributeError(
+                "module.mpc_controller must define MPCFollower or MPCController"
+            )
+
+        signature = inspect.signature(controller_cls)
+        required_params = [
+            param
+            for param in signature.parameters.values()
+            if param.default is inspect.Signature.empty
+            and param.kind
+            in (
+                inspect.Parameter.POSITIONAL_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            )
+        ]
+        if not required_params:
+            return controller_cls()
+        return controller_cls(world, vehicle)
+
+    raise ValueError(f"Unsupported controller: {controller_name}")
+
+
+def compute_controller_control(
+    controller,
+    vehicle_tf,
+    trajectory_xyz,
+    speed_mps,
+    *,
+    latency_ms=None,
+):
+    """Run a PID/MPC controller while passing latency only when supported."""
+
+    compute_control = controller.compute_control
+    try:
+        parameters = inspect.signature(compute_control).parameters
+    except (TypeError, ValueError):
+        parameters = {}
+    if "latency_ms" in parameters:
+        return compute_control(
+            vehicle_tf,
+            trajectory_xyz,
+            speed_mps,
+            latency_ms=latency_ms,
+        )
+    return compute_control(vehicle_tf, trajectory_xyz, speed_mps)
+
+
 def capture_initial_ui_frame(carla_if, frame_count):
     """Tick once so paused pygame starts with a real camera frame."""
 
@@ -71,7 +135,7 @@ def capture_initial_ui_frame(carla_if, frame_count):
     return frame_count, ui_frame, telemetry
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Run CARLA closed-loop control with Alpamayo (modular)."
     )
@@ -98,6 +162,12 @@ def parse_args():
         choices=("normal", "navigation", "vqa"),
         default="normal",
         help="Closed-loop inference mode. Default: normal.",
+    )
+    parser.add_argument(
+        "--controller",
+        choices=("pid", "mpc"),
+        default="pid",
+        help="Closed-loop trajectory controller. Default: pid.",
     )
     parser.add_argument(
         "--navigation-text",
@@ -145,7 +215,7 @@ def parse_args():
         action="store_true",
         help="Print async inference worker tracebacks when worker requests fail.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.start_paused = bool(args.pygame_ui)
     args.pygame_ui_video = (
         derive_pygame_ui_video_path(cfg.OUTPUT_VIDEO) if args.pygame_ui else None
@@ -168,6 +238,7 @@ def main():
     )
     print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
     print(f"Inference mode: {args.mode}")
+    print(f"Controller: {args.controller}")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
     print(f"CARLA map: {cfg.CARLA_MAP}")
     print(f"Device map: {args.device_map}")
@@ -229,7 +300,7 @@ def main():
         carla_if.setup_collision_sensor()
         time.sleep(1.0)
 
-        pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
+        controller = create_controller(args.controller, carla_if.world, carla_if.ego_vehicle)
 
         current_trajectory = None
         current_pred_xyz = None
@@ -266,12 +337,12 @@ def main():
         def _auto_respawn(reason):
             nonlocal current_trajectory, current_pred_xyz, prev_selected_trajectory
             nonlocal current_selected_traj_idx, current_cot, current_inference_time
-            nonlocal current_trajectory_ts, prev_control, pending_inference, pid_follower
+            nonlocal current_trajectory_ts, prev_control, pending_inference, controller
             nonlocal respawn_revision, last_vqa_submitted_revision, last_vqa_completed_revision
 
             print(f"[Frame {frame_count}] Auto-respawn: {reason}")
             carla_if.respawn_ego_vehicle()
-            pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
+            controller = create_controller(args.controller, carla_if.world, carla_if.ego_vehicle)
             current_trajectory = None
             current_pred_xyz = None
             prev_selected_trajectory = None
@@ -727,10 +798,17 @@ def main():
 
             if current_trajectory is not None:
                 vehicle_tf = carla_if.ego_vehicle.get_transform()
-                steering_raw, throttle_raw, brake_raw, _ctrl_debug = pid_follower.compute_control(
+                trajectory_latency_ms = max(0.0, float(current_inference_time)) * 1000.0
+                if current_trajectory_ts is not None:
+                    trajectory_latency_ms += (
+                        max(0.0, time.time() - current_trajectory_ts) * 1000.0
+                    )
+                steering_raw, throttle_raw, brake_raw, _ctrl_debug = compute_controller_control(
+                    controller,
                     vehicle_tf,
                     current_trajectory[:, :3],
                     float(state["speed"]),
+                    latency_ms=trajectory_latency_ms,
                 )
 
                 alpha = cfg.CONTROL_SMOOTH_ALPHA
@@ -751,8 +829,8 @@ def main():
                     pid_target_xyz = None
                     target_local_xy = _ctrl_debug.get("target_local_xy") if _ctrl_debug else None
                     if target_local_xy is not None:
-                        # PID debug target is in CARLA local frame (y=right); visualization uses
-                        # Alpamayo/trajectory image projection coordinates (y=left).
+                        # Controller debug target is in CARLA local frame (y=right);
+                        # visualization uses Alpamayo coordinates (y=left).
                         pid_target_xyz = [
                             float(target_local_xy[0]),
                             -float(target_local_xy[1]),

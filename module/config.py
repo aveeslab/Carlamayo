@@ -1,6 +1,8 @@
 """Configuration for CARLA closed-loop Alpamayo pipeline."""
 
+import math
 import os
+from pathlib import Path
 
 # User Config (Edit for your local CARLA 0.10 version/layout)
 # Use CARLA_010_ROOT to override without accidentally reusing a 0.9 CARLA_ROOT.
@@ -65,3 +67,39 @@ PID_LAT_KD = 0.15
 PID_LON_KP = 0.6
 PID_LON_KI = 0.05
 PID_LON_KD = 0.0
+
+# Linear MPC controller. Alpamayo emits 64 ego-frame points; MPC tracks a
+# compact arc-length reference and can expand its optimization horizon by
+# measured system latency.
+MPC_DT = 0.1
+MPC_HORIZON = 15
+WHEELBASE_M = 2.875
+MAX_STEER_RAD = 70.0 / 180.0 * math.pi
+ACCEL_MAX = 3.0
+DECEL_MAX = -5.0
+W_LAT = 50.0
+W_LON = 0.5
+W_HEADING = 35.0
+W_SPEED = 160.0
+W_STEER = 5.0
+W_ACCEL = 0.05
+W_DSTEER = 100.0
+W_DACCEL = 0.2
+MPC_MIN_SPEED_KMH = 25.0
+MPC_MIN_SPEED_FORWARD_MIN_M = 0.5
+MPC_BRAKE_MAX = 0.2
+MPC_REFERENCE_HORIZON_TIME_S = 2.0
+MPC_REFERENCE_SPEED_FLOOR_MPS = 5.0
+MPC_REFERENCE_MIN_DISTANCE_M = 4.0
+MPC_REFERENCE_MAX_DISTANCE_M = 40.0
+MPC_REFERENCE_SMOOTHING_WINDOW = 1
+MPC_LAUNCH_SPEED_THRESHOLD_MPS = 0.3
+MPC_LAUNCH_FORWARD_MIN_M = 2.0
+MPC_LAUNCH_THROTTLE_MIN = 0.2
+MPC_REFERENCE_DISTANCE_M = 27.0
+MPC_REFERENCE_POINTS = 64
+MPC_LATENCY_PRESET_DIR = Path("configs/mpc_latency_presets")
+MPC_LATENCY_PRESET_MIN_HORIZON = 5
+MPC_LATENCY_PRESET_MAX_HORIZON = 100
+MPC_LATENCY_PRESET_STEP = 5
+MPC_LATENCY_PRESET_WARMUP_RESULTS = 1

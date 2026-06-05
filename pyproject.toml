@@ -20,6 +20,7 @@ dependencies = [
   "opencv-python-headless>=4.10",
   "alpamayo1-5",
   "bitsandbytes>=0.43.0",
+  "osqp>=1.0.0",
 ]
 
 [dependency-groups]
