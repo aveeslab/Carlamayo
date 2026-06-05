@@ -90,7 +90,7 @@ def _install_fakes(monkeypatch):
     )
 
 
-def test_pid_follower_uses_official_pid_steer_without_map_projection(monkeypatch):
+def test_pid_follower_uses_official_pid_steer_with_8m_low_speed_target(monkeypatch):
     _install_fakes(monkeypatch)
     fake_map = RaisingMap()
     follower = pid_controller.OfficialPIDFollower(FakeWorld(fake_map), FakeVehicle())
@@ -111,14 +111,15 @@ def test_pid_follower_uses_official_pid_steer_without_map_projection(monkeypatch
         speed_mps=0.0,
     )
 
-    expected_local = np.array([3.0 + 1.0 / math.sqrt(2.0), 1.0 / math.sqrt(2.0)])
+    expected_local = np.array([10.0 - math.sqrt(8.0), 2.0])
 
     assert fake_map.called is False
     assert (steer, throttle, brake) == pytest.approx((-0.7, 0.2, 0.0))
     assert debug["mode"] == "official_pid"
-    assert debug["target_idx"] == 2
+    assert debug["lookahead_m"] == pytest.approx(8.0)
+    assert debug["target_idx"] == 3
     assert debug["target_local_xy"] == pytest.approx(expected_local.tolist())
-    assert debug["lookahead_path_m"] == pytest.approx(4.0)
+    assert debug["lookahead_path_m"] == pytest.approx(8.0)
     target_loc = follower.pid.last_waypoint.transform.location
     assert target_loc.x == pytest.approx(10.0 + expected_local[0])
     assert target_loc.y == pytest.approx(20.0 + expected_local[1])
