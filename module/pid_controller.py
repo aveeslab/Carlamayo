@@ -1,4 +1,4 @@
-"""PID controller helpers and trajectory-based CARLA follower."""
+"""PID controller helpers and official CARLA follower."""
 
 from __future__ import annotations
 
@@ -75,7 +75,7 @@ class LookaheadTarget:
 
 
 class OfficialPIDFollower:
-    """CARLA follower using official longitudinal PID and trajectory pure-pursuit steering."""
+    """CARLA official PID follower for raw Alpamayo targets."""
 
     def __init__(self, world, vehicle):
         VehiclePIDController = _resolve_vehicle_pid_controller()
@@ -168,28 +168,6 @@ class OfficialPIDFollower:
         )
         return RawTargetWaypoint(carla.Transform(loc, carla.Rotation()))
 
-    def _pure_pursuit_steer(self, target_local_xyz):
-        x = float(target_local_xyz[0])
-        y = float(target_local_xyz[1])
-        distance_sq = x * x + y * y
-        if distance_sq <= 1e-6 or x <= 0.0:
-            return 0.0, 0.0, 0.0, 0.0
-
-        distance_m = float(np.sqrt(distance_sq))
-        response_distance_m = min(distance_m, cfg.PID_STEER_RESPONSE_MAX_LOOKAHEAD_M)
-        response_distance_sq = max(response_distance_m * response_distance_m, 1e-6)
-
-        curvature = 2.0 * y / response_distance_sq
-        steer_angle_rad = float(np.arctan(cfg.PID_WHEELBASE_M * curvature))
-        steer = float(
-            np.clip(
-                steer_angle_rad / cfg.PID_STEER_NORMALIZATION_RAD,
-                -cfg.PID_MAX_STEER,
-                cfg.PID_MAX_STEER,
-            )
-        )
-        return steer, float(curvature), steer_angle_rad, response_distance_m
-
     def compute_control(self, vehicle_tf, wp_ego, speed_mps):
         wp_local = alpamayo_to_carla_local(wp_ego)
         traj_extent = float(np.max(np.linalg.norm(wp_local[:, :2], axis=1))) if len(wp_local) else 0.0
@@ -205,18 +183,15 @@ class OfficialPIDFollower:
         target = self._interpolate_lookahead_target(wp_local, lookahead_m)
         if target is None:
             return 0.0, 0.0, 0.0, {
-                "mode": "trajectory_pure_pursuit_no_target",
+                "mode": "official_pid_no_target",
                 "traj_extent": traj_extent,
             }
 
         target_wp = self._target_waypoint(vehicle_tf, target.local_xyz)
-        longitudinal_control = self.pid.run_step(target_speed_kmh, target_wp)
-        steer, curvature, steer_angle_rad, response_distance_m = self._pure_pursuit_steer(
-            target.local_xyz
-        )
+        control = self.pid.run_step(target_speed_kmh, target_wp)
 
         debug = {
-            "mode": "trajectory_pure_pursuit",
+            "mode": "official_pid",
             "target_speed_kmh": target_speed_kmh,
             "lookahead_m": lookahead_m,
             "lookahead_path_m": target.lookahead_path_m,
@@ -238,13 +213,10 @@ class OfficialPIDFollower:
             ],
             "target_projected_to_road": False,
             "traj_extent": traj_extent,
-            "pure_pursuit_curvature": curvature,
-            "pure_pursuit_steer_angle_rad": steer_angle_rad,
-            "pure_pursuit_response_distance_m": response_distance_m,
         }
         return (
-            steer,
-            float(longitudinal_control.throttle),
-            float(longitudinal_control.brake),
+            float(control.steer),
+            float(control.throttle),
+            float(control.brake),
             debug,
         )
