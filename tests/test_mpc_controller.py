@@ -1,7 +1,14 @@
+from dataclasses import replace
+
 import numpy as np
 
 from module import config as cfg
-from module.mpc_controller import MPCConfig, MPCFollower, resample_reference
+from module.mpc_controller import (
+    MPCConfig,
+    MPCFollower,
+    _apply_minimum_reference_speed,
+    resample_reference,
+)
 
 
 def test_mpc_config_loads_tuning_values_from_module_config():
@@ -52,3 +59,29 @@ def test_mpc_follower_solves_simple_forward_reference():
     assert -1.0 <= steer <= 1.0
     assert 0.0 <= throttle <= 1.0
     assert 0.0 <= brake <= 1.0
+
+
+def test_mpc_reference_speed_tapers_near_terminal_path_point():
+    config = replace(
+        MPCConfig.from_module_config(),
+        min_speed_kmh=18.0,
+        terminal_slowdown_distance_m=4.0,
+        terminal_speed_mps=0.0,
+    )
+    ref = np.column_stack(
+        [
+            np.linspace(0.0, 10.0, 6),
+            np.zeros(6),
+            np.zeros(6),
+            np.ones(6),
+        ]
+    )
+
+    tapered, min_speed_applied, _ref_forward_m, min_speed_mps = (
+        _apply_minimum_reference_speed(ref, config)
+    )
+
+    assert min_speed_applied is True
+    assert tapered[1, 3] == min_speed_mps
+    assert 0.0 < tapered[-2, 3] < min_speed_mps
+    assert tapered[-1, 3] == 0.0

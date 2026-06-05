@@ -49,6 +49,8 @@ class MPCConfig:
     reference_min_distance_m: float
     reference_max_distance_m: float
     reference_smoothing_window: int
+    terminal_slowdown_distance_m: float
+    terminal_speed_mps: float
     steering_tau: float = 0.1
     accel_tau: float = 0.1
 
@@ -77,6 +79,8 @@ class MPCConfig:
             reference_min_distance_m=cfg.MPC_REFERENCE_MIN_DISTANCE_M,
             reference_max_distance_m=cfg.MPC_REFERENCE_MAX_DISTANCE_M,
             reference_smoothing_window=cfg.MPC_REFERENCE_SMOOTHING_WINDOW,
+            terminal_slowdown_distance_m=cfg.MPC_TERMINAL_SLOWDOWN_DISTANCE_M,
+            terminal_speed_mps=cfg.MPC_TERMINAL_SPEED_MPS,
         )
 
     @classmethod
@@ -134,6 +138,10 @@ class MPCConfig:
             )
         if self.reference_smoothing_window < 1:
             raise ValueError("MPC reference_smoothing_window must be positive")
+        if self.terminal_slowdown_distance_m < 0.0:
+            raise ValueError("MPC terminal_slowdown_distance_m must be non-negative")
+        if self.terminal_speed_mps < 0.0:
+            raise ValueError("MPC terminal_speed_mps must be non-negative")
 
     def with_latency_ms(self, latency_ms: float | None) -> "MPCConfig":
         """Return a latency-adjusted config with a longer optimization horizon.
@@ -322,6 +330,17 @@ def _apply_minimum_reference_speed(
 
     floored = ref.copy()
     floored[1:, 3] = np.maximum(floored[1:, 3], min_speed_mps)
+    if config.terminal_slowdown_distance_m > 0.0:
+        segment_lengths = np.linalg.norm(np.diff(floored[:, :2], axis=0), axis=1)
+        arc_lengths = np.concatenate([[0.0], np.cumsum(segment_lengths)])
+        remaining = np.maximum(0.0, float(arc_lengths[-1]) - arc_lengths)
+        slowdown_ratio = np.clip(
+            remaining / float(config.terminal_slowdown_distance_m),
+            0.0,
+            1.0,
+        )
+        terminal_speed = float(config.terminal_speed_mps)
+        floored[:, 3] = terminal_speed + (floored[:, 3] - terminal_speed) * slowdown_ratio
     return floored, True, ref_forward_m, min_speed_mps
 
 
