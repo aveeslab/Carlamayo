@@ -748,6 +748,16 @@ def main():
 
                 if current_pred_xyz is not None:
                     cam_img = images[1]
+                    pid_target_xyz = None
+                    target_local_xy = _ctrl_debug.get("target_local_xy") if _ctrl_debug else None
+                    if target_local_xy is not None:
+                        # PID debug target is in CARLA local frame (y=right); visualization uses
+                        # Alpamayo/trajectory image projection coordinates (y=left).
+                        pid_target_xyz = [
+                            float(target_local_xy[0]),
+                            -float(target_local_xy[1]),
+                            0.0,
+                        ]
                     vis_frame = create_visualization_frame(
                         cam_img,
                         current_pred_xyz,
@@ -760,6 +770,7 @@ def main():
                         navigation_text=nav_state.navigation_text,
                         navigation_weight=nav_state.navigation_weight,
                         paused=nav_state.paused,
+                        pid_target_xyz=pid_target_xyz,
                     )
                     latest_ui_frame = vis_frame
                     if cfg.SAVE_VIDEO:

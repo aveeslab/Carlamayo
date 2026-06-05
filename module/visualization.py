@@ -49,7 +49,66 @@ def _project_one_trajectory(
         cv2.circle(result, tuple(pt), max(4, line_thickness), point_color, -1, cv2.LINE_AA)
 
 
-def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, camera_height=2.4, fov=120):
+def _project_point_to_image(point_3d, img_width, img_height, focal_length_px, camera_height):
+    point = np.asarray(point_3d, dtype=np.float64).reshape(-1)
+    if len(point) < 2:
+        return None
+
+    x = float(point[0])
+    y = float(point[1])
+    z = float(point[2]) if len(point) >= 3 else 0.0
+    if x <= 0.5:
+        return None
+
+    z_cam = z + camera_height
+    with np.errstate(divide="ignore", invalid="ignore"):
+        u = img_width / 2 - (y / x) * focal_length_px
+        v_temp = img_height / 2 - (z_cam / x) * focal_length_px
+        v = img_height - v_temp
+
+    if not np.isfinite(u) or not np.isfinite(v):
+        return None
+    return (
+        int(np.clip(u, 0, img_width - 1)),
+        int(np.clip(v, 0, img_height - 1)),
+    )
+
+
+def _draw_pid_target_marker(result, point_3d, img_width, img_height, focal_length_px, camera_height):
+    point_2d = _project_point_to_image(
+        point_3d,
+        img_width=img_width,
+        img_height=img_height,
+        focal_length_px=focal_length_px,
+        camera_height=camera_height,
+    )
+    if point_2d is None:
+        return
+
+    cv2.circle(result, point_2d, 16, (255, 255, 255), -1, cv2.LINE_AA)
+    cv2.circle(result, point_2d, 11, (0, 255, 0), -1, cv2.LINE_AA)
+    cv2.circle(result, point_2d, 4, (0, 0, 0), -1, cv2.LINE_AA)
+    label_pos = (min(point_2d[0] + 18, img_width - 60), max(point_2d[1] - 12, 20))
+    cv2.putText(
+        result,
+        "PID",
+        label_pos,
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.65,
+        (0, 255, 0),
+        2,
+        cv2.LINE_AA,
+    )
+
+
+def project_trajectory_to_image(
+    cam_img,
+    pred_xyz,
+    selected_idx=0,
+    camera_height=2.4,
+    fov=120,
+    pid_target_xyz=None,
+):
     """Project one or multiple trajectories onto image."""
     img_height, img_width = cam_img.shape[:2]
     focal_length_px = img_width / (2 * np.tan(np.radians(fov / 2)))
@@ -97,6 +156,16 @@ def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, camera_height
         line_thickness=8,
     )
 
+    if pid_target_xyz is not None:
+        _draw_pid_target_marker(
+            result=result,
+            point_3d=pid_target_xyz,
+            img_width=img_width,
+            img_height=img_height,
+            focal_length_px=focal_length_px,
+            camera_height=camera_height,
+        )
+
     return result
 
 
@@ -112,9 +181,15 @@ def create_visualization_frame(
     navigation_text="",
     navigation_weight=1.0,
     paused=False,
+    pid_target_xyz=None,
 ):
     """Create a single visualization frame with all overlays."""
-    vis_img = project_trajectory_to_image(cam_img, pred_xyz, selected_idx=selected_idx)
+    vis_img = project_trajectory_to_image(
+        cam_img,
+        pred_xyz,
+        selected_idx=selected_idx,
+        pid_target_xyz=pid_target_xyz,
+    )
     vis_img = cv2.cvtColor(vis_img, cv2.COLOR_RGB2BGR)
     h, w = vis_img.shape[:2]
 

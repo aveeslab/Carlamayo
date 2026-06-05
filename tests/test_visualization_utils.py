@@ -34,6 +34,22 @@ def test_project_trajectory_to_image_accepts_torch_tensor():
     assert rendered.sum() > 0
 
 
+def test_project_trajectory_to_image_draws_pid_target_marker_on_top():
+    image = np.zeros((120, 160, 3), dtype=np.uint8)
+    trajectory = np.array([[[2.0, 0.0, 0.0], [6.0, 0.0, 0.0], [10.0, 0.0, 0.0]]])
+
+    rendered = project_trajectory_to_image(
+        image,
+        trajectory,
+        selected_idx=0,
+        pid_target_xyz=np.array([6.0, 0.0, 0.0]),
+    )
+
+    # The PID marker is a green dot drawn on top of the red trajectory near image center.
+    green_pixels = (rendered[..., 1] > 200) & (rendered[..., 0] < 80) & (rendered[..., 2] < 80)
+    assert green_pixels.any()
+
+
 def test_project_trajectory_to_image_rejects_invalid_rank():
     image = np.zeros((80, 120, 3), dtype=np.uint8)
     trajectory = np.zeros((2, 3, 4, 5), dtype=np.float32)
