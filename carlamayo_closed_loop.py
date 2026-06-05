@@ -112,6 +112,183 @@ def compute_controller_control(
     return compute_control(vehicle_tf, trajectory_xyz, speed_mps)
 
 
+def compute_trajectory_latency_ms(
+    *,
+    async_mode,
+    inference_time_s,
+    trajectory_ts,
+    now_ts=None,
+):
+    """Return trajectory age for controller latency compensation.
+
+    In synchronous mode CARLA simulation is paused while inference runs, so the
+    wall-clock model time is not simulated vehicle latency. In async mode the
+    vehicle keeps moving while inference runs, so compensate for model time plus
+    elapsed wall-clock age since the trajectory became available.
+    """
+
+    if not async_mode:
+        return 0.0
+    now_ts = time.time() if now_ts is None else float(now_ts)
+    inference_latency_s = max(0.0, float(inference_time_s))
+    trajectory_age_s = 0.0
+    if trajectory_ts is not None:
+        trajectory_age_s = max(0.0, now_ts - float(trajectory_ts))
+    return (inference_latency_s + trajectory_age_s) * 1000.0
+
+
+def _transform_yaw_radians(vehicle_tf):
+    return np.deg2rad(float(vehicle_tf.rotation.yaw))
+
+
+def local_trajectory_to_world_path(vehicle_tf, trajectory_ego):
+    """Convert Alpamayo ego-frame ``[x, y_left, z]`` points to world path points."""
+
+    points = np.asarray(trajectory_ego, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise ValueError(f"Expected trajectory shape (N, >=2), got {points.shape}")
+    if len(points) == 0:
+        raise ValueError("Trajectory must contain at least one point")
+
+    yaw = _transform_yaw_radians(vehicle_tf)
+    cos_yaw = float(np.cos(yaw))
+    sin_yaw = float(np.sin(yaw))
+    x_forward = points[:, 0]
+    y_right = -points[:, 1]
+    z_up = points[:, 2] if points.shape[1] >= 3 else np.zeros(len(points), dtype=np.float64)
+
+    world_x = float(vehicle_tf.location.x) + cos_yaw * x_forward - sin_yaw * y_right
+    world_y = float(vehicle_tf.location.y) + sin_yaw * x_forward + cos_yaw * y_right
+    world_z = float(vehicle_tf.location.z) + z_up
+    return np.column_stack([world_x, world_y, world_z])
+
+
+def world_path_to_local_trajectory(vehicle_tf, world_path):
+    """Convert world path points to Alpamayo ego-frame ``[x, y_left, z]`` points."""
+
+    points = np.asarray(world_path, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise ValueError(f"Expected world path shape (N, >=2), got {points.shape}")
+    if len(points) == 0:
+        raise ValueError("World path must contain at least one point")
+
+    yaw = _transform_yaw_radians(vehicle_tf)
+    cos_yaw = float(np.cos(yaw))
+    sin_yaw = float(np.sin(yaw))
+    dx = points[:, 0] - float(vehicle_tf.location.x)
+    dy = points[:, 1] - float(vehicle_tf.location.y)
+    x_forward = cos_yaw * dx + sin_yaw * dy
+    y_right = -sin_yaw * dx + cos_yaw * dy
+    z_up = (
+        points[:, 2] - float(vehicle_tf.location.z)
+        if points.shape[1] >= 3
+        else np.zeros(len(points), dtype=np.float64)
+    )
+    return np.column_stack([x_forward, -y_right, z_up])
+
+
+def path_arc_lengths(points_xy):
+    """Return cumulative arc lengths for a 2D/3D path."""
+
+    points = np.asarray(points_xy, dtype=np.float64)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise ValueError(f"Expected path shape (N, >=2), got {points.shape}")
+    if len(points) == 0:
+        raise ValueError("Path must contain at least one point")
+    if len(points) == 1:
+        return np.zeros(1, dtype=np.float64)
+    segment_lengths = np.linalg.norm(np.diff(points[:, :2], axis=0), axis=1)
+    return np.concatenate([[0.0], np.cumsum(segment_lengths)])
+
+
+def sample_world_path_by_arc(world_path, arc_lengths, sample_arc):
+    """Sample world path points at requested cumulative arc lengths."""
+
+    path = np.asarray(world_path, dtype=np.float64)
+    arc = np.asarray(arc_lengths, dtype=np.float64)
+    samples = np.asarray(sample_arc, dtype=np.float64)
+    if len(path) != len(arc):
+        raise ValueError("world_path and arc_lengths must have the same length")
+    if len(path) == 0:
+        raise ValueError("World path must contain at least one point")
+    if len(path) == 1 or float(arc[-1]) <= 1e-9:
+        return np.repeat(path[:1], len(samples), axis=0)
+    samples = np.clip(samples, float(arc[0]), float(arc[-1]))
+    return np.column_stack(
+        [
+            np.interp(samples, arc, path[:, dim])
+            for dim in range(path.shape[1])
+        ]
+    )
+
+
+def nearest_progress_on_world_path(world_path, vehicle_tf):
+    """Return nearest projected path progress and cross-track distance in meters."""
+
+    path = np.asarray(world_path, dtype=np.float64)
+    if path.ndim != 2 or path.shape[1] < 2:
+        raise ValueError(f"Expected world path shape (N, >=2), got {path.shape}")
+    if len(path) == 0:
+        raise ValueError("World path must contain at least one point")
+
+    vehicle_xy = np.array(
+        [float(vehicle_tf.location.x), float(vehicle_tf.location.y)],
+        dtype=np.float64,
+    )
+    arc = path_arc_lengths(path)
+    if len(path) == 1 or float(arc[-1]) <= 1e-9:
+        return 0.0, float(np.linalg.norm(vehicle_xy - path[0, :2]))
+
+    best_progress = 0.0
+    best_distance = float("inf")
+    for idx, segment in enumerate(np.diff(path[:, :2], axis=0)):
+        seg_len_sq = float(np.dot(segment, segment))
+        if seg_len_sq <= 1e-12:
+            continue
+        rel = vehicle_xy - path[idx, :2]
+        t = float(np.clip(np.dot(rel, segment) / seg_len_sq, 0.0, 1.0))
+        projection = path[idx, :2] + t * segment
+        distance = float(np.linalg.norm(vehicle_xy - projection))
+        if distance < best_distance:
+            best_distance = distance
+            best_progress = float(arc[idx] + t * np.sqrt(seg_len_sq))
+
+    return best_progress, best_distance
+
+
+def build_mpc_reference_from_world_path(
+    world_path,
+    vehicle_tf,
+    previous_progress_m=None,
+):
+    """Build a current-ego Alpamayo reference from a fixed world path."""
+
+    path = np.asarray(world_path, dtype=np.float64)
+    arc = path_arc_lengths(path)
+    total_length = float(arc[-1])
+    nearest_progress_m, cte_m = nearest_progress_on_world_path(path, vehicle_tf)
+    if previous_progress_m is not None and np.isfinite(previous_progress_m):
+        nearest_progress_m = max(
+            nearest_progress_m,
+            min(float(previous_progress_m), total_length),
+        )
+    progress_m = float(np.clip(nearest_progress_m, 0.0, total_length))
+
+    remaining_m = max(0.0, total_length - progress_m)
+    reference_distance_m = min(float(cfg.MPC_REFERENCE_DISTANCE_M), remaining_m)
+    if remaining_m > 0.0:
+        reference_distance_m = max(1.0, reference_distance_m)
+        reference_distance_m = min(reference_distance_m, remaining_m)
+    sample_arc = np.linspace(
+        progress_m,
+        progress_m + reference_distance_m,
+        int(cfg.MPC_REFERENCE_POINTS),
+    )
+    sampled_world_path = sample_world_path_by_arc(path, arc, sample_arc)
+    reference_local_xyz = world_path_to_local_trajectory(vehicle_tf, sampled_world_path)
+    return reference_local_xyz, progress_m, cte_m
+
+
 def capture_initial_ui_frame(carla_if, frame_count):
     """Tick once so paused pygame starts with a real camera frame."""
 
@@ -170,6 +347,15 @@ def parse_args(argv=None):
         help="Closed-loop trajectory controller. Default: pid.",
     )
     parser.add_argument(
+        "--inference-interval-frames",
+        type=int,
+        default=max(1, int(round(1.0 / cfg.CONTROL_DT))),
+        help=(
+            "SYNC mode trajectory inference interval in simulation frames. "
+            "Default: about 1 second of sim time."
+        ),
+    )
+    parser.add_argument(
         "--navigation-text",
         default="",
         help='Initial navigation instruction, e.g. "Turn right in 30m".',
@@ -220,6 +406,7 @@ def parse_args(argv=None):
     args.pygame_ui_video = (
         derive_pygame_ui_video_path(cfg.OUTPUT_VIDEO) if args.pygame_ui else None
     )
+    args.inference_interval_frames = max(1, int(args.inference_interval_frames))
     return args
 
 
@@ -239,6 +426,7 @@ def main():
     print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
     print(f"Inference mode: {args.mode}")
     print(f"Controller: {args.controller}")
+    print(f"SYNC inference interval: {args.inference_interval_frames} frame(s)")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
     print(f"CARLA map: {cfg.CARLA_MAP}")
     print(f"Device map: {args.device_map}")
@@ -303,6 +491,8 @@ def main():
         controller = create_controller(args.controller, carla_if.world, carla_if.ego_vehicle)
 
         current_trajectory = None
+        current_trajectory_world_path = None
+        current_mpc_path_progress_m = None
         current_pred_xyz = None
         prev_selected_trajectory = None
         current_selected_traj_idx = 0
@@ -315,6 +505,7 @@ def main():
         frame_buffer = []
         current_trajectory_ts = None
         prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 0.0}
+        last_sync_inference_frame = None
 
         pending_inference = False
         last_inference_submit_ts = 0.0
@@ -339,11 +530,15 @@ def main():
             nonlocal current_selected_traj_idx, current_cot, current_inference_time
             nonlocal current_trajectory_ts, prev_control, pending_inference, controller
             nonlocal respawn_revision, last_vqa_submitted_revision, last_vqa_completed_revision
+            nonlocal current_trajectory_world_path, current_mpc_path_progress_m
+            nonlocal last_sync_inference_frame
 
             print(f"[Frame {frame_count}] Auto-respawn: {reason}")
             carla_if.respawn_ego_vehicle()
             controller = create_controller(args.controller, carla_if.world, carla_if.ego_vehicle)
             current_trajectory = None
+            current_trajectory_world_path = None
+            current_mpc_path_progress_m = None
             current_pred_xyz = None
             prev_selected_trajectory = None
             current_selected_traj_idx = 0
@@ -352,6 +547,7 @@ def main():
             current_trajectory_ts = None
             prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
             pending_inference = False
+            last_sync_inference_frame = None
             respawn_revision += 1
             last_vqa_submitted_revision = None
             last_vqa_completed_revision = None
@@ -440,6 +636,7 @@ def main():
                     "images_array": images_array,
                     "history_xyz": history_xyz,
                     "history_rot": history_rot,
+                    "trajectory_origin_transform": carla_if.ego_vehicle.get_transform(),
                     "navigation_text": nav_state.navigation_text,
                     "navigation_weight": nav_state.navigation_weight,
                     "vqa_question": nav_state.vqa_question,
@@ -500,6 +697,9 @@ def main():
                                 "result_ts": time.time(),
                                 "navigation_text": navigation_text,
                                 "navigation_weight": navigation_weight,
+                                "trajectory_origin_transform": req[
+                                    "trajectory_origin_transform"
+                                ],
                                 "prompt_revision": req["prompt_revision"],
                                 "respawn_revision": req["respawn_revision"],
                             }
@@ -559,9 +759,12 @@ def main():
                         print(f"VQA question updated: {nav_state.vqa_question or '(none)'}")
                     prev_selected_trajectory = None
                     current_trajectory = None
+                    current_trajectory_world_path = None
+                    current_mpc_path_progress_m = None
                     current_pred_xyz = None
                     current_trajectory_ts = None
                     pending_inference = False
+                    last_sync_inference_frame = None
                     last_seen_nav_revision = nav_state.revision
                 if nav_state.paused:
                     carla_if._control(0.0, 0.0, 1.0)
@@ -698,6 +901,13 @@ def main():
                         current_cot = extract_cot_text(extra)
                         current_inference_time = inference_time
                         current_trajectory_ts = float(latest_result["result_ts"])
+                        current_trajectory_world_path = None
+                        current_mpc_path_progress_m = None
+                        if args.controller == "mpc":
+                            current_trajectory_world_path = local_trajectory_to_world_path(
+                                latest_result["trajectory_origin_transform"],
+                                current_trajectory[:, :3],
+                            )
 
                         print(
                             f"[Frame {frame_count}] Inference done: {inference_time:.2f}s "
@@ -719,29 +929,46 @@ def main():
                             print(latest_result["traceback"].rstrip())
             else:
                 if len(frame_buffer) >= cfg.NUM_FRAMES:
-                    images_array = np.zeros(
-                        (
-                            cfg.NUM_CAMERAS,
-                            cfg.NUM_FRAMES,
-                            cfg.IMG_HEIGHT,
-                            cfg.IMG_WIDTH,
-                            cfg.IMG_CHANNELS,
-                        ),
-                        dtype=np.uint8,
-                    )
-                    for t, frame_images in enumerate(frame_buffer):
-                        for c in range(cfg.NUM_CAMERAS):
-                            images_array[c, t] = frame_images[c]
-
-                    history_xyz, history_rot = carla_if.get_history_in_local_frame()
-
-                    model_data = prepare_model_input(images_array, history_xyz, history_rot)
                     if args.mode == "vqa":
                         should_run_vqa = (
                             bool(nav_state.vqa_question)
                             and nav_state.revision != last_vqa_completed_revision
                         )
-                        if should_run_vqa:
+                        should_run_inference = should_run_vqa
+                    else:
+                        should_run_inference = (
+                            current_trajectory is None
+                            or last_sync_inference_frame is None
+                            or (
+                                frame_count - int(last_sync_inference_frame)
+                            )
+                            >= args.inference_interval_frames
+                        )
+
+                    if should_run_inference:
+                        images_array = np.zeros(
+                            (
+                                cfg.NUM_CAMERAS,
+                                cfg.NUM_FRAMES,
+                                cfg.IMG_HEIGHT,
+                                cfg.IMG_WIDTH,
+                                cfg.IMG_CHANNELS,
+                            ),
+                            dtype=np.uint8,
+                        )
+                        for t, frame_images in enumerate(frame_buffer):
+                            for c in range(cfg.NUM_CAMERAS):
+                                images_array[c, t] = frame_images[c]
+
+                        history_xyz, history_rot = carla_if.get_history_in_local_frame()
+                        trajectory_origin_transform = carla_if.ego_vehicle.get_transform()
+
+                        model_data = prepare_model_input(
+                            images_array,
+                            history_xyz,
+                            history_rot,
+                        )
+                        if args.mode == "vqa":
                             model_start_time = time.time()
                             extra = _run_vqa_with_linalg_fallback(
                                 model_data,
@@ -755,61 +982,88 @@ def main():
                             print(f"[Frame {frame_count}] VQA: {model_inference_time:.2f}s")
                             print(f"    Q: {nav_state.vqa_question}")
                             print(f"    A: {format_vqa_answer_preview(answer)}")
-                    else:
-                        navigation_text = (
-                            nav_state.navigation_text if args.mode == "navigation" else ""
-                        )
-                        navigation_weight = (
-                            nav_state.navigation_weight if args.mode == "navigation" else 1.0
-                        )
-                        model_start_time = time.time()
-                        pred_xyz, extra = _run_inference_with_nav_fallback(
-                            model_data,
-                            navigation_text=navigation_text,
-                            navigation_weight=navigation_weight,
-                        )
-                        model_inference_time = time.time() - model_start_time
-
-                        traj_samples = extract_trajectory_samples(pred_xyz)
-                        selected_idx, _similarity_scores = select_trajectory_by_prev_similarity(
-                            traj_samples,
-                            prev_selected_trajectory,
-                        )
-                        current_selected_traj_idx = selected_idx
-                        current_trajectory = traj_samples[selected_idx]
-                        prev_selected_trajectory = current_trajectory.copy()
-                        current_pred_xyz = traj_samples
-                        current_cot = extract_cot_text(extra)
-                        current_inference_time = model_inference_time
-                        current_trajectory_ts = time.time()
-
-                        print(f"[Frame {frame_count}] Inference: {model_inference_time:.2f}s")
-                        print(f"    CoT: {current_cot[:60]}...")
-                        if args.mode == "navigation":
-                            print(
-                                f"    Nav: {nav_state.navigation_text or '(none)'} "
-                                f"(weight={nav_state.navigation_weight:.2f})"
+                        else:
+                            navigation_text = (
+                                nav_state.navigation_text if args.mode == "navigation" else ""
                             )
-                        print(
-                            f"    Selected traj sample: {current_selected_traj_idx}/"
-                            f"{cfg.NUM_TRAJ_SAMPLES - 1}"
-                        )
-                        print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
+                            navigation_weight = (
+                                nav_state.navigation_weight if args.mode == "navigation" else 1.0
+                            )
+                            model_start_time = time.time()
+                            pred_xyz, extra = _run_inference_with_nav_fallback(
+                                model_data,
+                                navigation_text=navigation_text,
+                                navigation_weight=navigation_weight,
+                            )
+                            model_inference_time = time.time() - model_start_time
+
+                            traj_samples = extract_trajectory_samples(pred_xyz)
+                            selected_idx, _similarity_scores = (
+                                select_trajectory_by_prev_similarity(
+                                    traj_samples,
+                                    prev_selected_trajectory,
+                                )
+                            )
+                            current_selected_traj_idx = selected_idx
+                            current_trajectory = traj_samples[selected_idx]
+                            prev_selected_trajectory = current_trajectory.copy()
+                            current_pred_xyz = traj_samples
+                            current_cot = extract_cot_text(extra)
+                            current_inference_time = model_inference_time
+                            current_trajectory_ts = time.time()
+                            current_trajectory_world_path = None
+                            current_mpc_path_progress_m = None
+                            last_sync_inference_frame = int(frame_count)
+                            if args.controller == "mpc":
+                                current_trajectory_world_path = (
+                                    local_trajectory_to_world_path(
+                                        trajectory_origin_transform,
+                                        current_trajectory[:, :3],
+                                    )
+                                )
+
+                            print(f"[Frame {frame_count}] Inference: {model_inference_time:.2f}s")
+                            print(f"    CoT: {current_cot[:60]}...")
+                            if args.mode == "navigation":
+                                print(
+                                    f"    Nav: {nav_state.navigation_text or '(none)'} "
+                                    f"(weight={nav_state.navigation_weight:.2f})"
+                                )
+                            print(
+                                f"    Selected traj sample: {current_selected_traj_idx}/"
+                                f"{cfg.NUM_TRAJ_SAMPLES - 1}"
+                            )
+                            print(f"    Traj[0:3]: {current_trajectory[:3, :2]}")
 
             if current_trajectory is not None:
                 vehicle_tf = carla_if.ego_vehicle.get_transform()
-                trajectory_latency_ms = max(0.0, float(current_inference_time)) * 1000.0
-                if current_trajectory_ts is not None:
-                    trajectory_latency_ms += (
-                        max(0.0, time.time() - current_trajectory_ts) * 1000.0
+                control_trajectory = current_trajectory[:, :3]
+                mpc_path_cte_m = None
+                if args.controller == "mpc" and current_trajectory_world_path is not None:
+                    (
+                        control_trajectory,
+                        current_mpc_path_progress_m,
+                        mpc_path_cte_m,
+                    ) = build_mpc_reference_from_world_path(
+                        current_trajectory_world_path,
+                        vehicle_tf,
+                        previous_progress_m=current_mpc_path_progress_m,
                     )
+                trajectory_latency_ms = compute_trajectory_latency_ms(
+                    async_mode=args.async_mode,
+                    inference_time_s=current_inference_time,
+                    trajectory_ts=current_trajectory_ts,
+                )
                 steering_raw, throttle_raw, brake_raw, _ctrl_debug = compute_controller_control(
                     controller,
                     vehicle_tf,
-                    current_trajectory[:, :3],
+                    control_trajectory,
                     float(state["speed"]),
                     latency_ms=trajectory_latency_ms,
                 )
+                if args.controller == "mpc" and _ctrl_debug is not None:
+                    _ctrl_debug["path_progress_m"] = current_mpc_path_progress_m
+                    _ctrl_debug["path_cte_m"] = mpc_path_cte_m
 
                 alpha = cfg.CONTROL_SMOOTH_ALPHA
                 steering = (1.0 - alpha) * prev_control["steer"] + alpha * steering_raw
