@@ -358,6 +358,24 @@ class MPCFollower:
         self._prev_u[:] = 0.0
         self._last_status = "reset"
 
+    def record_applied_control(self, steer_carla: float, throttle: float, brake: float) -> None:
+        """Synchronize MPC input state with the smoothed CARLA control actually applied."""
+
+        steer_carla = float(np.clip(steer_carla, -1.0, 1.0))
+        throttle = float(np.clip(throttle, 0.0, cfg.THROTTLE_MAX))
+        brake = float(np.clip(brake, 0.0, cfg.BRAKE_MAX))
+        steer_left_rad = -steer_carla * float(self.config.max_steer_rad)
+
+        if throttle >= brake:
+            accel = throttle / max(float(cfg.THROTTLE_MAX), 1e-6) * self.config.accel_max
+        else:
+            accel = -brake / max(float(cfg.BRAKE_MAX), 1e-6) * abs(self.config.decel_max)
+
+        self._prev_u[:] = [
+            float(np.clip(steer_left_rad, -self.config.max_steer_rad, self.config.max_steer_rad)),
+            float(np.clip(accel, self.config.decel_max, self.config.accel_max)),
+        ]
+
     def compute_control(self, _vehicle_tf, wp_ego, speed_mps, latency_ms: float | None = None):
         start = time.perf_counter()
         control_config = self.config.with_latency_ms(latency_ms)

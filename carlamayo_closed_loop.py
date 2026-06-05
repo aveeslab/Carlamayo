@@ -112,6 +112,14 @@ def compute_controller_control(
     return compute_control(vehicle_tf, trajectory_xyz, speed_mps)
 
 
+def record_applied_controller_control(controller, *, steer, throttle, brake):
+    """Let controllers observe the smoothed control that was actually applied."""
+
+    recorder = getattr(controller, "record_applied_control", None)
+    if callable(recorder):
+        recorder(float(steer), float(throttle), float(brake))
+
+
 def compute_trajectory_latency_ms(
     *,
     async_mode,
@@ -1076,6 +1084,12 @@ def main():
                     throttle = 0.0
 
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
+                record_applied_controller_control(
+                    controller,
+                    steer=steering,
+                    throttle=throttle,
+                    brake=brake,
+                )
                 carla_if.apply_control(steering, throttle, brake)
 
                 if current_pred_xyz is not None:

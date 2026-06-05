@@ -61,6 +61,20 @@ def test_mpc_follower_solves_simple_forward_reference():
     assert 0.0 <= brake <= 1.0
 
 
+def test_mpc_records_smoothed_applied_control_as_previous_input():
+    follower = MPCFollower()
+
+    follower.record_applied_control(steer_carla=0.25, throttle=0.1, brake=0.0)
+
+    assert follower._prev_u[0] == -0.25 * cfg.MAX_STEER_RAD
+    assert follower._prev_u[1] == 0.1 / cfg.THROTTLE_MAX * cfg.ACCEL_MAX
+
+    follower.record_applied_control(steer_carla=0.0, throttle=0.0, brake=cfg.BRAKE_MAX)
+
+    assert follower._prev_u[0] == 0.0
+    assert follower._prev_u[1] == cfg.DECEL_MAX
+
+
 def test_mpc_reference_speed_tapers_near_terminal_path_point():
     config = replace(
         MPCConfig.from_module_config(),

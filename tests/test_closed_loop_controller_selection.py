@@ -98,6 +98,37 @@ def test_compute_controller_control_preserves_pid_call_shape():
     assert result == ("tf", "traj", 3.0)
 
 
+def test_record_applied_controller_control_uses_optional_hook():
+    class Controller:
+        def __init__(self):
+            self.applied = None
+
+        def record_applied_control(self, steer, throttle, brake):
+            self.applied = (steer, throttle, brake)
+
+    controller = Controller()
+
+    carlamayo_closed_loop.record_applied_controller_control(
+        controller,
+        steer=0.1,
+        throttle=0.2,
+        brake=0.0,
+    )
+
+    assert controller.applied == (0.1, 0.2, 0.0)
+
+
+def test_record_applied_controller_control_ignores_legacy_controllers():
+    controller = object()
+
+    carlamayo_closed_loop.record_applied_controller_control(
+        controller,
+        steer=0.1,
+        throttle=0.2,
+        brake=0.0,
+    )
+
+
 def test_sync_trajectory_latency_ignores_wall_clock_inference_time():
     assert (
         carlamayo_closed_loop.compute_trajectory_latency_ms(
