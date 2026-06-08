@@ -1,10 +1,10 @@
-import math
 import types
 
 import numpy as np
 import pytest
 
 from module import pid_controller
+from module import config as cfg
 
 
 class FakeLocation:
@@ -90,7 +90,19 @@ def _install_fakes(monkeypatch):
     )
 
 
-def test_pid_follower_uses_official_pid_steer_with_8m_low_speed_target(monkeypatch):
+def _arc_length_target(points, lookahead_m):
+    path = np.vstack([np.zeros((1, 3), dtype=np.float64), points[:, :3]])
+    segment_lengths = np.linalg.norm(np.diff(path[:, :2], axis=0), axis=1)
+    arc_lengths = np.concatenate([[0.0], np.cumsum(segment_lengths)])
+    target_s = min(float(lookahead_m), float(arc_lengths[-1]))
+    target_xyz = np.column_stack(
+        [np.interp([target_s], arc_lengths, path[:, dim]) for dim in range(3)]
+    )[0]
+    target_idx = min(int(np.searchsorted(arc_lengths[1:], target_s, side="left")), len(points) - 1)
+    return target_xyz, target_idx, target_s
+
+
+def test_pid_follower_uses_official_pid_steer_with_configured_low_speed_target(monkeypatch):
     _install_fakes(monkeypatch)
     fake_map = RaisingMap()
     follower = pid_controller.OfficialPIDFollower(FakeWorld(fake_map), FakeVehicle())
@@ -111,15 +123,18 @@ def test_pid_follower_uses_official_pid_steer_with_8m_low_speed_target(monkeypat
         speed_mps=0.0,
     )
 
-    expected_local = np.array([10.0 - math.sqrt(8.0), 2.0])
+    expected_local, expected_target_idx, expected_path_m = _arc_length_target(
+        pid_controller.alpamayo_to_carla_local(wp_ego),
+        cfg.PID_LOOKAHEAD_MIN_M,
+    )
 
     assert fake_map.called is False
     assert (steer, throttle, brake) == pytest.approx((-0.7, 0.2, 0.0))
     assert debug["mode"] == "official_pid"
-    assert debug["lookahead_m"] == pytest.approx(8.0)
-    assert debug["target_idx"] == 3
-    assert debug["target_local_xy"] == pytest.approx(expected_local.tolist())
-    assert debug["lookahead_path_m"] == pytest.approx(8.0)
+    assert debug["lookahead_m"] == pytest.approx(cfg.PID_LOOKAHEAD_MIN_M)
+    assert debug["target_idx"] == expected_target_idx
+    assert debug["target_local_xy"] == pytest.approx(expected_local[:2].tolist())
+    assert debug["lookahead_path_m"] == pytest.approx(expected_path_m)
     target_loc = follower.pid.last_waypoint.transform.location
     assert target_loc.x == pytest.approx(10.0 + expected_local[0])
     assert target_loc.y == pytest.approx(20.0 + expected_local[1])
