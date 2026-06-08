@@ -30,7 +30,7 @@ def _set_blueprint_role_name(blueprint, role_name):
 
 
 def select_vehicle_blueprint(blueprint_library, preferred_id=None, role_name=None):
-    """Return a CARLA vehicle blueprint, falling back when 0.9-era IDs are absent."""
+    """Return a preferred CARLA vehicle blueprint or report a compatible alternative."""
 
     preferred_id = preferred_id or cfg.EGO_VEHICLE_BLUEPRINT
     if preferred_id:
@@ -38,8 +38,11 @@ def select_vehicle_blueprint(blueprint_library, preferred_id=None, role_name=Non
             blueprint = blueprint_library.find(preferred_id)
             _set_blueprint_role_name(blueprint, role_name)
             return blueprint
-        except (IndexError, RuntimeError, ValueError):
-            pass
+        except (IndexError, RuntimeError, ValueError) as exc:
+            print(
+                "Warning: preferred CARLA vehicle blueprint "
+                f"{preferred_id} unavailable ({exc}); selecting a compatible passenger car."
+            )
 
     candidates = [
         blueprint
@@ -68,7 +71,7 @@ class CARLAInterface:
         self.npc_vehicle_ids = []
         self.npc_walker_ids = []
         self.npc_walker_controller_ids = []
-        self.tm_port = 8000
+        self.tm_port = cfg.CARLA_TRAFFIC_MANAGER_PORT
 
         self.camera_configs = {
             "cam_front_left": {"x": 1.0, "y": -0.5, "z": 2.4, "pitch": 0.0, "yaw": -60.0, "fov": 120},
@@ -78,10 +81,12 @@ class CARLAInterface:
         }
         self.camera_order = ["cam_front_left", "cam_front_wide", "cam_front_right", "cam_front_tele"]
 
-    def connect(self, host="localhost", port=2000):
+    def connect(self, host=None, port=None):
+        host = cfg.CARLA_HOST if host is None else host
+        port = cfg.CARLA_PORT if port is None else port
         print(f"Connecting to CARLA at {host}:{port}...")
         self.client = carla.Client(host, port)
-        self.client.set_timeout(20.0)
+        self.client.set_timeout(cfg.CARLA_CLIENT_TIMEOUT_SEC)
         self.world = self.client.get_world()
         print("Connected to CARLA")
 
@@ -92,7 +97,7 @@ class CARLAInterface:
             self.world = self.client.load_world(map_name)
             print("Map load requested. Waiting for world tick...")
             self.world.wait_for_tick(20.0)
-            time.sleep(1.0)
+            time.sleep(cfg.CARLA_WORLD_SETTLE_SECONDS)
             print(f"Map loaded: {map_name}")
         else:
             print(f"Already on map: {current_map}")
@@ -100,7 +105,7 @@ class CARLAInterface:
     def enable_synchronous_mode(self):
         settings = self.world.get_settings()
         settings.synchronous_mode = True
-        settings.fixed_delta_seconds = 0.1
+        settings.fixed_delta_seconds = cfg.CONTROL_DT
         self.world.apply_settings(settings)
         tm = self.client.get_trafficmanager(self.tm_port)
         tm.set_synchronous_mode(True)

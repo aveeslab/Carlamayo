@@ -120,6 +120,20 @@ def record_applied_controller_control(controller, *, steer, throttle, brake):
         recorder(float(steer), float(throttle), float(brake))
 
 
+def enqueue_inference_stop(request_q):
+    """Place a worker stop sentinel without silently dropping it behind stale work."""
+
+    while True:
+        try:
+            request_q.put_nowait(None)
+            return
+        except queue.Full:
+            try:
+                request_q.get_nowait()
+            except queue.Empty:
+                continue
+
+
 def compute_trajectory_latency_ms(
     *,
     async_mode,
@@ -566,7 +580,7 @@ def main():
             frame_buffer.clear()
             _clear_async_queues()
 
-        def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
+        def _run_inference_with_nav_recovery(model_data, navigation_text, navigation_weight):
             def _run_once(weight):
                 return run_inference(
                     model,
@@ -586,7 +600,7 @@ def main():
                 if navigation_text and abs(float(navigation_weight) - 1.0) > 1e-6:
                     message = (
                         "Navigation CFG ran out of CUDA memory; "
-                        "falling back to normal nav conditioning with weight 1.0."
+                        "retrying with normal nav conditioning at weight 1.0."
                     )
                     print(message)
                     nav_state.set_error(message)
@@ -604,7 +618,7 @@ def main():
                 configure_cuda_linalg_library("magma")
                 return _run_once(navigation_weight)
 
-        def _run_vqa_with_linalg_fallback(model_data, question):
+        def _run_vqa_with_linalg_retry(model_data, question):
             try:
                 return run_vqa(model, processor, model_data, question=question)
             except RuntimeError as exc:
@@ -669,7 +683,7 @@ def main():
                             req["history_rot"],
                         )
                         if req["mode"] == "vqa":
-                            extra = _run_vqa_with_linalg_fallback(
+                            extra = _run_vqa_with_linalg_retry(
                                 model_data,
                                 question=req["vqa_question"],
                             )
@@ -691,7 +705,7 @@ def main():
                             navigation_weight = (
                                 req["navigation_weight"] if req["mode"] == "navigation" else 1.0
                             )
-                            pred_xyz, extra = _run_inference_with_nav_fallback(
+                            pred_xyz, extra = _run_inference_with_nav_recovery(
                                 model_data,
                                 navigation_text=navigation_text,
                                 navigation_weight=navigation_weight,
@@ -978,7 +992,7 @@ def main():
                         )
                         if args.mode == "vqa":
                             model_start_time = time.time()
-                            extra = _run_vqa_with_linalg_fallback(
+                            extra = _run_vqa_with_linalg_retry(
                                 model_data,
                                 question=nav_state.vqa_question,
                             )
@@ -998,7 +1012,7 @@ def main():
                                 nav_state.navigation_weight if args.mode == "navigation" else 1.0
                             )
                             model_start_time = time.time()
-                            pred_xyz, extra = _run_inference_with_nav_fallback(
+                            pred_xyz, extra = _run_inference_with_nav_recovery(
                                 model_data,
                                 navigation_text=navigation_text,
                                 navigation_weight=navigation_weight,
@@ -1159,10 +1173,7 @@ def main():
     finally:
         if args.async_mode and inference_stop is not None:
             inference_stop.set()
-            try:
-                inference_request_q.put_nowait(None)
-            except Exception:
-                pass
+            enqueue_inference_stop(inference_request_q)
             if worker_thread is not None:
                 worker_thread.join(timeout=2.0)
         if cfg.SAVE_VIDEO and video_recorder:

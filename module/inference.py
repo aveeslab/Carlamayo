@@ -250,7 +250,7 @@ def _extract_answer_from_decoded_text(decoded_text):
     return _clean_generated_answer_text(candidate)
 
 
-def _generate_vqa_text_with_partial_answer_fallback(
+def _generate_vqa_text_from_decoded_tokens(
     model,
     model_inputs,
     top_p=0.98,
@@ -342,7 +342,7 @@ def run_vqa(
 
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         if hasattr(model, "vlm") and hasattr(model, "tokenizer"):
-            return _generate_vqa_text_with_partial_answer_fallback(
+            return _generate_vqa_text_from_decoded_tokens(
                 model,
                 model_inputs,
                 top_p=0.98,

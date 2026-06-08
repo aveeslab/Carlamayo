@@ -106,7 +106,7 @@ def test_cleanup_reports_recoverable_teardown_failures(capsys):
     assert "Warning: failed to restore world asynchronous mode" in output
 
 
-def test_select_vehicle_blueprint_falls_back_when_preferred_id_is_missing():
+def test_select_vehicle_blueprint_reports_preferred_id_miss_before_compatible_choice(capsys):
     carla_interface = importlib.import_module("module.carla_interface")
 
     class FakeBlueprint:
@@ -139,3 +139,5 @@ def test_select_vehicle_blueprint_falls_back_when_preferred_id_is_missing():
 
     assert selected.id == "vehicle.lincoln.mkz"
     assert selected.attrs["role_name"] == "hero"
+    output = capsys.readouterr().out
+    assert "Warning: preferred CARLA vehicle blueprint vehicle.tesla.model3 unavailable" in output

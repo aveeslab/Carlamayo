@@ -8,6 +8,11 @@ from pathlib import Path
 # Use CARLA_010_ROOT to override without accidentally reusing a 0.9 CARLA_ROOT.
 CARLA_VERSION = "0.10.0"
 CARLA_AGENT_ROOT = os.path.expanduser("~/Carla-0.10.0")
+CARLA_HOST = os.environ.get("CARLA_HOST", "localhost")
+CARLA_PORT = int(os.environ.get("CARLA_PORT", "2000"))
+CARLA_TRAFFIC_MANAGER_PORT = int(os.environ.get("CARLA_TRAFFIC_MANAGER_PORT", "8000"))
+CARLA_CLIENT_TIMEOUT_SEC = float(os.environ.get("CARLA_CLIENT_TIMEOUT_SEC", "20.0"))
+CARLA_WORLD_SETTLE_SECONDS = 1.0
 
 # Alpamayo Configuration
 NUM_CAMERAS = 4

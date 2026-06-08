@@ -137,8 +137,8 @@ def main():
     tm = None
 
     try:
-        client = carla.Client("localhost", 2000)
-        client.set_timeout(20.0)
+        client = carla.Client(cfg.CARLA_HOST, cfg.CARLA_PORT)
+        client.set_timeout(cfg.CARLA_CLIENT_TIMEOUT_SEC)
         world = client.load_world(cfg.CARLA_MAP)
         bp_lib = world.get_blueprint_library()
 
@@ -154,7 +154,7 @@ def main():
         settings.fixed_delta_seconds = FIXED_DELTA_SECONDS
         world.apply_settings(settings)
 
-        tm = client.get_trafficmanager(8000)
+        tm = client.get_trafficmanager(cfg.CARLA_TRAFFIC_MANAGER_PORT)
         tm.set_synchronous_mode(True)
         tm.set_global_distance_to_leading_vehicle(2.5)
 

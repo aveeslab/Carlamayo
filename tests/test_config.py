@@ -39,3 +39,7 @@ def test_carla_010_defaults_point_to_local_install_and_available_map():
     assert cfg.CARLA_AGENT_ROOT.endswith("Carla-0.10.0")
     assert cfg.CARLA_MAP == "Town10HD_Opt"
     assert cfg.EGO_VEHICLE_BLUEPRINT.startswith("vehicle.")
+    assert cfg.CARLA_HOST == "localhost"
+    assert cfg.CARLA_PORT == 2000
+    assert cfg.CARLA_TRAFFIC_MANAGER_PORT == 8000
+    assert cfg.CARLA_CLIENT_TIMEOUT_SEC > 0.0

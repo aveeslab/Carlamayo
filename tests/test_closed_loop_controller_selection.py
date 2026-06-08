@@ -1,3 +1,4 @@
+import queue
 import types
 
 import numpy as np
@@ -127,6 +128,17 @@ def test_record_applied_controller_control_ignores_legacy_controllers():
         throttle=0.2,
         brake=0.0,
     )
+
+
+def test_enqueue_inference_stop_replaces_stale_request_with_stop_sentinel():
+    request_q = queue.Queue(maxsize=1)
+    stale_request = object()
+    request_q.put_nowait(stale_request)
+
+    carlamayo_closed_loop.enqueue_inference_stop(request_q)
+
+    assert request_q.get_nowait() is None
+    assert request_q.empty()
 
 
 def test_sync_trajectory_latency_ignores_wall_clock_inference_time():
