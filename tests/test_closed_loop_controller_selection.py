@@ -25,11 +25,11 @@ class FakeTransform:
         self.rotation = FakeRotation(yaw)
 
 
-def test_parse_args_defaults_to_pid_controller():
+def test_parse_args_defaults_to_pid_controller_and_every_frame_inference():
     args = carlamayo_closed_loop.parse_args([])
 
     assert args.controller == "pid"
-    assert args.inference_interval_frames > 0
+    assert args.inference_interval_frames == 1
 
 
 def test_parse_args_accepts_mpc_controller():

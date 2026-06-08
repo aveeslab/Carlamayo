@@ -371,10 +371,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--inference-interval-frames",
         type=int,
-        default=max(1, int(round(1.0 / cfg.CONTROL_DT))),
+        default=1,
         help=(
             "SYNC mode trajectory inference interval in simulation frames. "
-            "Default: about 1 second of sim time."
+            "Default: every simulation frame."
         ),
     )
     parser.add_argument(
