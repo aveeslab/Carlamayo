@@ -27,6 +27,7 @@ jobs:
             pytest \
             numpy \
             scipy \
+            osqp \
             pillow \
             opencv-python-headless \
             transformers==4.57.1 \
