@@ -230,3 +230,7 @@ __marimo__/
 
 # Agent runtime instructions
 AGENTS.md
+CLAUDE.md
+.gjc/
+.claude/
+.code-review-graph/
