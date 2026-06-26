@@ -79,10 +79,11 @@ config.attn_implementation = "sdpa"
 
 If you encounter OOM errors:
 
-1. Try 4-bit quantization with `--quantization`.
-2. Ensure you have a GPU with enough VRAM for the selected precision and trajectory count.
-3. Keep `num_traj_samples` low on smaller GPUs.
-4. Close other GPU-intensive applications.
+1. Use **OOM-free mode** (`--oom-free`) to stream Alpamayo's layers from host memory on demand, so the full-precision model fits alongside a running CARLA server without quantization or accuracy loss — this is the recommended fix when CARLA and Alpamayo must share a ≤16 GB GPU. See [OOM-Free Mode](docs/oom-free-mode.md).
+2. Try 4-bit quantization with `--quantization`.
+3. Ensure you have a GPU with enough VRAM for the selected precision and trajectory count.
+4. Keep `num_traj_samples` low on smaller GPUs.
+5. Close other GPU-intensive applications.
 
 ## License and Third-Party Licenses
 
