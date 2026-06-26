@@ -17,12 +17,24 @@ card. Unlike quantization, demand layering keeps the model in **full precision**
 
 ## Requirements
 
-The `alpamayo_memopt` package must be importable. Install it once into the
-inference environment (editable, no extra deps):
+`third_party/oom-free-alpamayo` is a git submodule, fetched alongside the
+Alpamayo submodule by:
+
+```bash
+git submodule update --init --recursive
+```
+
+The `alpamayo_memopt` package then needs to be importable. Installing it
+editable into the inference environment is recommended (matches the Alpamayo
+submodule pattern):
 
 ```bash
 pip install --no-deps -e third_party/oom-free-alpamayo
 ```
+
+This step is optional: `module/oom_offload.py` falls back to adding the
+submodule directory to `sys.path`, so `--oom-free` also works with just the
+submodule checked out.
 
 It also needs enough host RAM to hold the full weights (**≥ 22 GB DRAM**) and a
 CUDA GPU. No separate profiling step or `config.json` is required — the residency

@@ -56,6 +56,7 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 ├── docs/                        # Environment setup and workflow guides.
 ├── assets/                      # README images and demo media.
 ├── third_party/alpamayo1.5/     # NVIDIA Alpamayo 1.5 git submodule.
+├── third_party/oom-free-alpamayo/ # OOM-free demand-layering git submodule (optional --oom-free).
 ├── .github/workflows/ci.yml     # Lightweight GitHub Actions test workflow.
 ├── pyproject.toml               # Python project metadata and Ruff configuration.
 ├── uv.lock                      # Locked uv dependency graph for reproducible installs.

@@ -1,3 +1,6 @@
 [submodule "third_party/alpamayo1.5"]
 	path = third_party/alpamayo1.5
 	url = https://github.com/NVlabs/alpamayo1.5
+[submodule "third_party/oom-free-alpamayo"]
+	path = third_party/oom-free-alpamayo
+	url = https://github.com/aveeslab/oom-free-alpamayo.git
