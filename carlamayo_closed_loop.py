@@ -82,6 +82,38 @@ def parse_args():
         help="Use 4-bit quantized model instead of the default full-precision model.",
     )
     parser.add_argument(
+        "--oom-free",
+        dest="oom_free",
+        action="store_true",
+        default=False,
+        help=(
+            "Use OOM-free CPU<->GPU demand layering (third_party/oom-free-alpamayo) "
+            "instead of loading the whole model on the GPU. Streams full-precision "
+            "VLM/ViT/Expert layers on demand so Alpamayo fits alongside a running "
+            "CARLA server. The model is loaded after CARLA is fully spawned so the "
+            "residency plan reflects the VRAM CARLA actually uses. Mutually "
+            "exclusive with --quantization."
+        ),
+    )
+    parser.add_argument(
+        "--oom-free-headroom-gb",
+        type=float,
+        default=None,
+        help="OOM-free: VRAM (GB) reserved for activation spikes. Default ~3.5.",
+    )
+    parser.add_argument(
+        "--oom-free-margin",
+        type=int,
+        default=None,
+        help="OOM-free: safety margin subtracted from the max resident VLM layer count.",
+    )
+    parser.add_argument(
+        "--oom-free-resident",
+        type=int,
+        default=None,
+        help="OOM-free: force this many GPU-resident VLM layers (default: auto from free VRAM).",
+    )
+    parser.add_argument(
         "--async",
         dest="async_mode",
         action="store_true",
@@ -145,6 +177,8 @@ def parse_args():
         help="Print async inference worker tracebacks when worker requests fail.",
     )
     args = parser.parse_args()
+    if args.oom_free and args.quantization:
+        parser.error("--oom-free and --quantization are mutually exclusive.")
     args.start_paused = bool(args.pygame_ui)
     args.pygame_ui_video = (
         derive_pygame_ui_video_path(cfg.OUTPUT_VIDEO) if args.pygame_ui else None
@@ -159,7 +193,10 @@ def main():
     print("=" * 60)
     print("CARLA Real-time Control with Alpamayo")
     print("=" * 60)
-    print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
+    if args.oom_free:
+        print("Model loading: OOM-free CPU<->GPU demand layering (full-precision)")
+    else:
+        print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
     print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
     print(f"Inference mode: {args.mode}")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
@@ -185,9 +222,16 @@ def main():
 
     print("\nLoading model...")
     configure_cuda_linalg_library(args.cuda_linalg_library)
-    model, processor = load_model(args.quantization, device_map=args.device_map)
-    print("Model loaded!")
-    print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
+    model = None
+    processor = None
+    if not args.oom_free:
+        model, processor = load_model(args.quantization, device_map=args.device_map)
+        print("Model loaded!")
+        print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
+    else:
+        # Defer loading until CARLA has spawned its cameras/NPCs so the OOM-free
+        # residency plan is computed against the VRAM CARLA actually leaves free.
+        print("OOM-free mode: Alpamayo loads after CARLA is fully spawned.")
 
     carla_if = CARLAInterface()
     video_recorder = VideoRecorder(cfg.OUTPUT_VIDEO, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
@@ -222,6 +266,21 @@ def main():
         carla_if.setup_cameras()
         carla_if.setup_collision_sensor()
         time.sleep(1.0)
+
+        if args.oom_free:
+            from module.oom_offload import load_offloaded_model
+
+            print("Loading model (OOM-free CPU<->GPU demand layering)...")
+            oom_kwargs = {}
+            if args.oom_free_headroom_gb is not None:
+                oom_kwargs["headroom_gb"] = args.oom_free_headroom_gb
+            if args.oom_free_margin is not None:
+                oom_kwargs["margin"] = args.oom_free_margin
+            if args.oom_free_resident is not None:
+                oom_kwargs["resident_override"] = args.oom_free_resident
+            model, processor = load_offloaded_model(**oom_kwargs)
+            print("Model loaded!")
+            print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
         pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
 

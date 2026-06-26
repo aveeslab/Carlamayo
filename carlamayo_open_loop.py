@@ -43,6 +43,35 @@ def parse_args():
         help="Use 4-bit quantized model instead of the default full-precision model.",
     )
     parser.add_argument(
+        "--oom-free",
+        dest="oom_free",
+        action="store_true",
+        help=(
+            "Use OOM-free CPU<->GPU demand layering (third_party/oom-free-alpamayo) "
+            "instead of loading the whole model on the GPU. Streams full-precision "
+            "VLM/ViT/Expert layers on demand to keep peak VRAM low. Mutually "
+            "exclusive with --quantization."
+        ),
+    )
+    parser.add_argument(
+        "--oom-free-headroom-gb",
+        type=float,
+        default=None,
+        help="OOM-free: VRAM (GB) reserved for activation spikes. Default ~3.5.",
+    )
+    parser.add_argument(
+        "--oom-free-margin",
+        type=int,
+        default=None,
+        help="OOM-free: safety margin subtracted from the max resident VLM layer count.",
+    )
+    parser.add_argument(
+        "--oom-free-resident",
+        type=int,
+        default=None,
+        help="OOM-free: force this many GPU-resident VLM layers (default: auto from free VRAM).",
+    )
+    parser.add_argument(
         "--device-map",
         default="auto",
         help='Model device_map passed to from_pretrained. Default: "auto".',
@@ -56,7 +85,10 @@ def parse_args():
             'Default: "magma" to match the closed-loop runner.'
         ),
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.oom_free and args.use_quantization:
+        parser.error("--oom-free and --quantization are mutually exclusive.")
+    return args
 
 
 def load_model_input(data_root, trajectory, frame_ids, frame_index):
@@ -97,13 +129,26 @@ def run_single_frame(model, processor, model_input):
     return extract_trajectory_samples(pred_xyz), extract_cot_text(extra), inference_time
 
 
-def load_open_loop_model(use_quantization, device_map, cuda_linalg_library):
+def load_open_loop_model(args):
     """Load the shared Alpamayo model stack used by the closed-loop runner."""
 
     from module.inference import configure_cuda_linalg_library, load_model
 
-    configure_cuda_linalg_library(cuda_linalg_library)
-    return load_model(use_quantization, device_map=device_map)
+    configure_cuda_linalg_library(args.cuda_linalg_library)
+
+    if args.oom_free:
+        from module.oom_offload import load_offloaded_model
+
+        kwargs = {}
+        if args.oom_free_headroom_gb is not None:
+            kwargs["headroom_gb"] = args.oom_free_headroom_gb
+        if args.oom_free_margin is not None:
+            kwargs["margin"] = args.oom_free_margin
+        if args.oom_free_resident is not None:
+            kwargs["resident_override"] = args.oom_free_resident
+        return load_offloaded_model(**kwargs)
+
+    return load_model(args.use_quantization, device_map=args.device_map)
 
 
 def main():
@@ -113,7 +158,10 @@ def main():
     print("CARLA -> Alpamayo 1.5 Open-Loop Inference")
     print("=" * 60)
     print(f"Data root: {args.data_root}")
-    print(f"Quantization: {'ON (4-bit)' if args.use_quantization else 'OFF (full-precision)'}")
+    if args.oom_free:
+        print("Model loading: OOM-free CPU<->GPU demand layering (full-precision)")
+    else:
+        print(f"Quantization: {'ON (4-bit)' if args.use_quantization else 'OFF (full-precision)'}")
     print(f"Device map: {args.device_map}")
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
 
@@ -128,11 +176,7 @@ def main():
         return
 
     print("\nLoading model...")
-    model, processor = load_open_loop_model(
-        args.use_quantization,
-        args.device_map,
-        args.cuda_linalg_library,
-    )
+    model, processor = load_open_loop_model(args)
     print("Model loaded!")
 
     predictions = []

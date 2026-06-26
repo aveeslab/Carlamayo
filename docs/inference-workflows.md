@@ -43,6 +43,13 @@ Optional 4-bit quantized mode:
 python carlamayo_open_loop.py --quantization
 ```
 
+Optional OOM-free mode (full-precision CPU↔GPU demand layering; see
+[OOM-Free Mode](oom-free-mode.md)):
+
+```bash
+python carlamayo_open_loop.py --oom-free
+```
+
 Output:
 
 - `carla_alpamayo_open_loop_result.mp4`
@@ -98,7 +105,17 @@ Mode-specific usage guides:
 Optional 4-bit quantized mode:
 
 ```bash
-python carlamayo_open_loop.py --quantization
+python carlamayo_closed_loop.py --quantization
+```
+
+Optional OOM-free mode — keep CARLA running and offload only Alpamayo via
+full-precision CPU↔GPU demand layering (see [OOM-Free Mode](oom-free-mode.md)).
+On a 16 GB GPU this fits where `--quantization` still OOMs against a live CARLA:
+
+```bash
+python carlamayo_closed_loop.py --mode normal --oom-free
+# off-tick inference is recommended for the slower offloaded model:
+python carlamayo_closed_loop.py --mode normal --oom-free --async
 ```
 
 Optional async inference mode:

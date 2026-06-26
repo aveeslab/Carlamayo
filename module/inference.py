@@ -89,6 +89,19 @@ def load_model(use_quantization: bool, device_map="auto"):
     return model, processor
 
 
+def _prime_oom_pipeline(model):
+    """Reset the OOM-free demand-layering pipeline before an inference, if any.
+
+    When the model was loaded with ``module.oom_offload.load_offloaded_model``
+    (``--oom-free``), a ``TriHookPipeline`` is attached as ``model._oom_pipeline``
+    and must be primed once per inference. A normally-loaded model has no such
+    attribute and this is a no-op.
+    """
+    pipeline = getattr(model, "_oom_pipeline", None)
+    if pipeline is not None:
+        pipeline.start_iteration()
+
+
 def prepare_model_input(images_array, history_xyz, history_rot):
     """Convert CARLA data to model input format."""
     images = torch.from_numpy(images_array).permute(0, 1, 4, 2, 3).contiguous()
@@ -164,6 +177,7 @@ def run_inference(
         }
 
     disable_generate_logits = disable_unused_generate_logits and not use_cfg_nav
+    _prime_oom_pipeline(model)
     with (
         optimized_vlm_generate(
             model,
@@ -336,6 +350,7 @@ def run_vqa(
     )
     model_inputs = helper.to_device({"tokenized_data": inputs}, "cuda")
 
+    _prime_oom_pipeline(model)
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
         if hasattr(model, "vlm") and hasattr(model, "tokenizer"):
             return _generate_vqa_text_with_partial_answer_fallback(

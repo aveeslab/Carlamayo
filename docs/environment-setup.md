@@ -89,6 +89,7 @@ source a1_5_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install --no-deps -e third_party/alpamayo1.5
+python -m pip install --no-deps -e third_party/oom-free-alpamayo  # optional: enables --oom-free
 python -m pip install -r requirements-alpamayo.txt
 ```
 
@@ -120,6 +121,7 @@ source a1_5_carla_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
 python -m pip install --no-deps -e third_party/alpamayo1.5
+python -m pip install --no-deps -e third_party/oom-free-alpamayo  # optional: enables --oom-free
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
 
