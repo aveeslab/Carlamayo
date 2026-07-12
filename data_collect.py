@@ -39,6 +39,22 @@ SENSOR_CONFIGS = {
     "cam_rear_wide": {"x": -1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 180.0, "fov": 120},
     "cam_rear_tele": {"x": -1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 180.0, "fov": 30},
 }
+WEATHER_FIELDS = (
+    "cloudiness",
+    "precipitation",
+    "precipitation_deposits",
+    "wind_intensity",
+    "sun_azimuth_angle",
+    "sun_altitude_angle",
+    "fog_density",
+    "fog_distance",
+    "fog_falloff",
+    "wetness",
+    "scattering_intensity",
+    "mie_scattering_scale",
+    "rayleigh_scattering_scale",
+    "dust_storm",
+)
 
 
 def parse_args(argv=None):
@@ -83,6 +99,29 @@ def resolve_weather(name, carla_module=carla):
     if weather is None:
         raise ValueError(f"Unknown CARLA weather preset: {name}")
     return weather
+
+
+def _weather_matches(expected, actual, tolerance=0.1):
+    compared = False
+    for field in WEATHER_FIELDS:
+        if not hasattr(expected, field) or not hasattr(actual, field):
+            continue
+        compared = True
+        if abs(float(getattr(expected, field)) - float(getattr(actual, field))) > tolerance:
+            return False
+    return compared
+
+
+def apply_weather_until_ready(world, weather, max_ticks=50):
+    """Apply weather and wait for the synchronous world to report the full preset."""
+
+    world.set_weather(weather)
+    for _ in range(max_ticks):
+        world.tick()
+        actual = world.get_weather()
+        if _weather_matches(weather, actual):
+            return actual
+    raise RuntimeError(f"CARLA weather preset did not become active within {max_ticks} ticks")
 
 
 def capture_complete(recorded_frames, frame_limit):
@@ -207,13 +246,12 @@ def main(argv=None):
         world.apply_settings(settings)
 
         if args.weather is not None:
-            world.set_weather(resolve_weather(args.weather))
-            world.tick()
-            applied_weather = world.get_weather()
+            applied_weather = apply_weather_until_ready(world, resolve_weather(args.weather))
             print(
                 f"Weather: {args.weather} | "
                 f"cloudiness={applied_weather.cloudiness:.1f} "
                 f"precipitation={applied_weather.precipitation:.1f} "
+                f"deposits={applied_weather.precipitation_deposits:.1f} "
                 f"wetness={applied_weather.wetness:.1f}"
             )
 

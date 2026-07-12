@@ -67,6 +67,59 @@ def test_unknown_weather_is_rejected():
         data_collect.resolve_weather("FloodMagic", fake_carla)
 
 
+def test_apply_weather_waits_until_all_preset_values_match():
+    preset = types.SimpleNamespace(cloudiness=100.0, precipitation=100.0, wetness=100.0)
+
+    class World:
+        def __init__(self):
+            self.states = iter(
+                [
+                    types.SimpleNamespace(
+                        cloudiness=100.0, precipitation=100.0, wetness=0.0
+                    ),
+                    types.SimpleNamespace(
+                        cloudiness=100.0, precipitation=100.0, wetness=100.0
+                    ),
+                ]
+            )
+            self.ticks = 0
+            self.applied = None
+
+        def set_weather(self, weather):
+            self.applied = weather
+
+        def tick(self):
+            self.ticks += 1
+
+        def get_weather(self):
+            return next(self.states)
+
+    world = World()
+
+    actual = data_collect.apply_weather_until_ready(world, preset, max_ticks=3)
+
+    assert world.applied is preset
+    assert world.ticks == 2
+    assert actual.wetness == 100.0
+
+
+def test_apply_weather_raises_when_preset_never_becomes_active():
+    preset = types.SimpleNamespace(cloudiness=100.0, precipitation=100.0, wetness=100.0)
+
+    class World:
+        def set_weather(self, weather):
+            pass
+
+        def tick(self):
+            pass
+
+        def get_weather(self):
+            return types.SimpleNamespace(cloudiness=100.0, precipitation=100.0, wetness=0.0)
+
+    with pytest.raises(RuntimeError, match="did not become active"):
+        data_collect.apply_weather_until_ready(World(), preset, max_ticks=2)
+
+
 @pytest.mark.parametrize(
     ("recorded", "limit", "expected"),
     [
