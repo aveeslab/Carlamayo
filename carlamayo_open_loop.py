@@ -6,7 +6,9 @@
 """Run open-loop Alpamayo inference on a recorded CARLA dataset."""
 
 import argparse
+import math
 import time
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -22,9 +24,37 @@ from module.open_loop_dataset import (
 DEFAULT_OUTPUT_VIDEO = "carla_alpamayo_open_loop_result.mp4"
 
 
-def parse_args():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
         description="Run Alpamayo open-loop inference on CARLA-collected data."
+    )
+    parser.add_argument(
+        "--mode",
+        choices=("normal", "nav", "navigation", "vqa"),
+        default="normal",
+        help="Open-loop task: trajectory, navigation-conditioned trajectory, or VQA.",
+    )
+    parser.add_argument(
+        "--navigation-text",
+        default="",
+        help="Navigation instruction applied to every frame in navigation mode.",
+    )
+    parser.add_argument(
+        "--navigation-weight",
+        type=float,
+        default=1.0,
+        help="Navigation guidance weight. Default: 1.0.",
+    )
+    parser.add_argument(
+        "--vqa-question",
+        default="",
+        help="Question applied to every frame in VQA mode.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Generation temperature. Zero selects deterministic decoding. Default: 0.",
     )
     parser.add_argument(
         "--data-root",
@@ -35,6 +65,11 @@ def parse_args():
         "--output-video",
         default=DEFAULT_OUTPUT_VIDEO,
         help=f"Output visualization video path. Default: {DEFAULT_OUTPUT_VIDEO}.",
+    )
+    parser.add_argument(
+        "--output-json",
+        default=None,
+        help="VQA result JSON path. Default: output video path with a .json suffix.",
     )
     parser.add_argument(
         "--quantization",
@@ -85,7 +120,23 @@ def parse_args():
             'Default: "magma" to match the closed-loop runner.'
         ),
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
+    args.mode = "navigation" if args.mode == "nav" else args.mode
+    args.navigation_text = args.navigation_text.strip()
+    args.vqa_question = args.vqa_question.strip()
+
+    if args.mode == "navigation" and not args.navigation_text:
+        parser.error("--navigation-text is required in navigation mode.")
+    if args.mode == "vqa" and not args.vqa_question:
+        parser.error("--vqa-question is required in VQA mode.")
+    if not math.isfinite(args.navigation_weight) or args.navigation_weight < 0:
+        parser.error("--navigation-weight must be a non-negative finite number.")
+    if not math.isfinite(args.temperature) or args.temperature < 0:
+        parser.error("--temperature must be a non-negative finite number.")
+    if args.mode == "vqa":
+        args.output_json = args.output_json or str(Path(args.output_video).with_suffix(".json"))
+    elif args.output_json is not None:
+        parser.error("--output-json is only valid in VQA mode.")
     if args.oom_free and args.use_quantization:
         parser.error("--oom-free and --quantization are mutually exclusive.")
     return args
