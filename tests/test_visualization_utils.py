@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import torch
 
+from module import visualization
 from module.visualization import (
     VideoRecorder,
     create_open_loop_visualization_frame,
@@ -83,6 +84,25 @@ def test_create_open_loop_visualization_frame_adds_header_and_cot_overlay():
     assert frame.sum() > 0
 
 
+def test_open_loop_navigation_frame_accepts_instruction_metadata():
+    image = np.zeros((240, 640, 3), dtype=np.uint8)
+    trajectory = np.array([[[2.0, 0.0, 0.0], [5.0, 0.2, 0.0], [8.0, 0.4, 0.0]]])
+
+    frame = create_open_loop_visualization_frame(
+        image,
+        trajectory,
+        frame_count=1,
+        total_frames=2,
+        inference_time=0.12,
+        cot_text="Proceed cautiously.",
+        navigation_text="Keep right through the water",
+        navigation_weight=1.2,
+    )
+
+    assert frame.shape == image.shape
+    assert frame.sum() > 0
+
+
 def test_video_recorder_no_frames_does_not_create_output(tmp_path):
     output_path = tmp_path / "empty.mp4"
 
@@ -107,3 +127,39 @@ def test_save_open_loop_video_writes_nonempty_video(tmp_path):
 
     assert Path(output_path).exists()
     assert output_path.stat().st_size > 0
+
+
+def test_create_open_loop_vqa_frame_renders_answer_without_projecting_trajectory(monkeypatch):
+    image = np.full((240, 640, 3), 80, dtype=np.uint8)
+    monkeypatch.setattr(
+        visualization,
+        "project_trajectory_to_image",
+        lambda *args, **kwargs: pytest.fail("trajectory projection ran for VQA"),
+    )
+
+    frame = visualization.create_open_loop_vqa_frame(
+        image,
+        frame_count=1,
+        total_frames=2,
+        inference_time=0.5,
+        question="Is the road flooded?",
+        answer="Yes, water covers the road.",
+    )
+
+    assert frame.shape == image.shape
+    assert np.any(frame != image)
+
+
+def test_save_open_loop_vqa_video_writes_nonempty_video(tmp_path):
+    output = tmp_path / "vqa.mp4"
+
+    visualization.save_open_loop_vqa_video(
+        [np.zeros((240, 640, 3), dtype=np.uint8)],
+        ["Yes"],
+        [0.5],
+        "Is it flooded?",
+        output,
+        fps=5,
+    )
+
+    assert output.stat().st_size > 0

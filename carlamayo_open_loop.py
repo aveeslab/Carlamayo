@@ -233,13 +233,15 @@ def load_open_loop_model(args):
     return load_model(args.use_quantization, device_map=args.device_map)
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    args = parse_args(argv)
 
     print("=" * 60)
     print("CARLA -> Alpamayo 1.5 Open-Loop Inference")
     print("=" * 60)
     print(f"Data root: {args.data_root}")
+    print(f"Mode: {args.mode}")
+    print(f"Temperature: {args.temperature}")
     if args.oom_free:
         print("Model loading: OOM-free CPU<->GPU demand layering (full-precision)")
     else:
@@ -248,13 +250,12 @@ def main():
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
 
     trajectory, frame_ids = load_trajectory_index(args.data_root)
-    start_index = cfg.NUM_FRAMES - 1
-    frames_to_process = max(0, len(frame_ids) - start_index)
+    frames_to_process = len(frame_ids)
     print(f"\nTotal recorded frames: {len(frame_ids)}")
     print(f"Frames selected for inference: {frames_to_process}")
 
     if frames_to_process == 0:
-        print("Not enough frames to build the requested camera history.")
+        print("No recorded frames found.")
         return
 
     print("\nLoading model...")
@@ -263,41 +264,83 @@ def main():
 
     predictions = []
     cot_texts = []
+    answer_texts = []
     inference_times = []
     camera_images = []
+    vqa_document = None
+    if args.mode == "vqa":
+        from module.open_loop_results import create_vqa_document
 
-    for frame_index in range(start_index, len(frame_ids)):
-        display_index = frame_index - start_index + 1
+        vqa_document = create_vqa_document(
+            args.data_root,
+            args.vqa_question,
+            args.temperature,
+        )
+
+    for frame_index in range(len(frame_ids)):
+        display_index = frame_index + 1
         frame_id = frame_ids[frame_index]
         print(f"  Frame {display_index}/{frames_to_process} (CARLA frame={frame_id})")
 
         model_input = load_model_input(args.data_root, trajectory, frame_ids, frame_index)
-        pred_xyz, cot_text, inference_time = run_trajectory_frame(
-            model,
-            processor,
-            model_input,
-            navigation_text=args.navigation_text if args.mode == "navigation" else None,
-            navigation_weight=args.navigation_weight,
-            temperature=args.temperature,
-        )
+        if args.mode == "vqa":
+            from module.open_loop_results import append_vqa_frame, write_json_atomic
 
-        predictions.append(pred_xyz)
-        cot_texts.append(cot_text)
+            answer, inference_time = run_vqa_frame(
+                model,
+                processor,
+                model_input,
+                question=args.vqa_question,
+                temperature=args.temperature,
+            )
+            answer_texts.append(answer)
+            append_vqa_frame(
+                vqa_document,
+                display_index,
+                frame_id,
+                answer,
+                inference_time,
+            )
+            write_json_atomic(vqa_document, args.output_json)
+            print(f"    Inference: {inference_time:.2f}s | Answer: {answer[:80]}...")
+        else:
+            pred_xyz, cot_text, inference_time = run_trajectory_frame(
+                model,
+                processor,
+                model_input,
+                navigation_text=args.navigation_text if args.mode == "navigation" else None,
+                navigation_weight=args.navigation_weight,
+                temperature=args.temperature,
+            )
+            predictions.append(pred_xyz)
+            cot_texts.append(cot_text)
+            print(f"    Inference: {inference_time:.2f}s | CoC: {cot_text[:80]}...")
+
         inference_times.append(inference_time)
         camera_images.append(load_front_camera_image(args.data_root, frame_id))
-
-        print(f"    Inference: {inference_time:.2f}s | CoC: {cot_text[:80]}...")
 
     avg_time = float(np.mean(inference_times)) if inference_times else 0.0
     print("\n" + "=" * 60)
     print("Summary")
     print("=" * 60)
-    print(f"Total frames processed: {len(predictions)}")
+    print(f"Total frames processed: {len(inference_times)}")
     print(f"Average inference time: {avg_time:.2f}s/frame")
     if torch.cuda.is_available():
         print(f"Memory usage: {torch.cuda.memory_allocated() / 1024**3:.2f} GB")
 
-    if predictions:
+    if args.mode == "vqa" and answer_texts:
+        from module.visualization import save_open_loop_vqa_video
+
+        print("\nCreating VQA video...")
+        save_open_loop_vqa_video(
+            camera_images,
+            answer_texts,
+            inference_times,
+            args.vqa_question,
+            args.output_video,
+            fps=5,
+        )
+    elif predictions:
         from module.visualization import save_open_loop_video
 
         print("\nCreating video...")
@@ -308,6 +351,8 @@ def main():
             inference_times,
             args.output_video,
             fps=5,
+            navigation_text=args.navigation_text if args.mode == "navigation" else "",
+            navigation_weight=args.navigation_weight,
         )
 
     print("\n" + "=" * 60)

@@ -1,3 +1,6 @@
+import importlib
+import json
+
 import pytest
 import numpy as np
 import torch
@@ -126,3 +129,78 @@ def test_vqa_frame_returns_only_extracted_answer_and_latency(monkeypatch):
 
     assert answer == "Yes."
     assert inference_time >= 0
+
+
+def test_vqa_document_checkpoints_full_frame_identity(tmp_path):
+    results = importlib.import_module("module.open_loop_results")
+    document = results.create_vqa_document("dataset", "Is it flooded?", temperature=0.0)
+    results.append_vqa_frame(document, 1, 77, "Yes, standing water is visible.", 1.25)
+    output = tmp_path / "answers.json"
+
+    results.write_json_atomic(document, output)
+
+    saved = json.loads(output.read_text())
+    assert saved["question"] == "Is it flooded?"
+    assert saved["frames"] == [
+        {
+            "frame_index": 1,
+            "carla_frame_id": 77,
+            "answer": "Yes, standing water is visible.",
+            "inference_time_seconds": 1.25,
+        }
+    ]
+    assert not (tmp_path / "answers.json.tmp").exists()
+
+
+def test_vqa_main_processes_every_frame_without_trajectory_inference(tmp_path, monkeypatch):
+    frame_ids = [101, 102]
+    answers = iter([("No standing water.", 0.4), ("Yes, flooding is visible.", 0.5)])
+    captured_video = {}
+
+    monkeypatch.setattr(open_loop, "load_trajectory_index", lambda data_root: ({}, frame_ids))
+    monkeypatch.setattr(open_loop, "load_open_loop_model", lambda args: (object(), object()))
+    monkeypatch.setattr(open_loop, "load_model_input", lambda *args, **kwargs: {})
+    monkeypatch.setattr(open_loop, "run_vqa_frame", lambda *args, **kwargs: next(answers))
+    monkeypatch.setattr(
+        open_loop,
+        "run_trajectory_frame",
+        lambda *args, **kwargs: pytest.fail("trajectory inference ran in VQA mode"),
+    )
+    monkeypatch.setattr(
+        open_loop,
+        "load_front_camera_image",
+        lambda *args, **kwargs: np.zeros((80, 120, 3), dtype=np.uint8),
+    )
+    monkeypatch.setattr(
+        "module.visualization.save_open_loop_vqa_video",
+        lambda camera_images, answer_texts, inference_times, question, output_path, fps=5: (
+            captured_video.update(
+                images=len(camera_images), answers=list(answer_texts), question=question
+            )
+        ),
+        raising=False,
+    )
+    output_json = tmp_path / "answers.json"
+
+    open_loop.main(
+        [
+            "--mode",
+            "vqa",
+            "--vqa-question",
+            "Is the road flooded?",
+            "--data-root",
+            str(tmp_path),
+            "--output-video",
+            str(tmp_path / "answers.mp4"),
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    saved = json.loads(output_json.read_text())
+    assert [item["carla_frame_id"] for item in saved["frames"]] == frame_ids
+    assert captured_video == {
+        "images": 2,
+        "answers": ["No standing water.", "Yes, flooding is visible."],
+        "question": "Is the road flooded?",
+    }

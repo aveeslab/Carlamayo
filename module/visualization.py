@@ -190,6 +190,8 @@ def create_open_loop_visualization_frame(
     total_frames,
     inference_time,
     cot_text,
+    navigation_text="",
+    navigation_weight=1.0,
 ):
     """Create one open-loop visualization frame with trajectory and text overlays."""
 
@@ -223,19 +225,82 @@ def create_open_loop_visualization_frame(
     )
 
     overlay = vis_img.copy()
-    cv2.rectangle(overlay, (10, height - 170), (width - 10, height - 10), (0, 0, 0), -1)
+    cv2.rectangle(overlay, (10, height - 190), (width - 10, height - 10), (0, 0, 0), -1)
     vis_img = cv2.addWeighted(overlay, 0.6, vis_img, 0.4, 0)
 
     cot_display = str(cot_text or "").strip()
     cot_display = cot_display[:240] + "..." if len(cot_display) > 240 else cot_display
-    lines = textwrap.wrap(f"Chain-of-Causation: {cot_display}", width=120)
-    y_offset = height - 125
-    for line in lines[:4]:
+    lines = []
+    if navigation_text:
+        navigation_display = str(navigation_text).strip()
+        navigation_display = (
+            navigation_display[:180] + "..."
+            if len(navigation_display) > 180
+            else navigation_display
+        )
+        lines.extend(
+            textwrap.wrap(
+                f"Navigation: {navigation_display} | Weight: {navigation_weight:.2f}",
+                width=120,
+            )
+        )
+    lines.extend(textwrap.wrap(f"Chain-of-Causation: {cot_display}", width=120))
+    y_offset = height - 150
+    for line in lines[:5]:
         cv2.putText(
             vis_img,
             line,
             (20, y_offset),
             cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        y_offset += 30
+
+    return cv2.cvtColor(vis_img, cv2.COLOR_BGR2RGB)
+
+
+def create_open_loop_vqa_frame(
+    cam_img,
+    frame_count,
+    total_frames,
+    inference_time,
+    question,
+    answer,
+):
+    """Create one open-loop VQA frame without trajectory or CoT overlays."""
+
+    vis_img = cv2.cvtColor(cam_img.copy(), cv2.COLOR_RGB2BGR)
+    height, width = vis_img.shape[:2]
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    header = f"Frame: {frame_count}/{total_frames} | Inference: {inference_time:.2f}s"
+
+    overlay = vis_img.copy()
+    cv2.rectangle(overlay, (10, 10), (width - 10, 65), (0, 0, 0), -1)
+    cv2.rectangle(overlay, (10, height - 190), (width - 10, height - 10), (0, 0, 0), -1)
+    vis_img = cv2.addWeighted(overlay, 0.65, vis_img, 0.35, 0)
+    cv2.putText(
+        vis_img,
+        header,
+        (20, 48),
+        font,
+        1.0,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+
+    question_lines = textwrap.wrap(f"Question: {str(question).strip()}", width=110)
+    answer_lines = textwrap.wrap(f"Answer: {str(answer).strip()}", width=110)
+    y_offset = height - 150
+    for line in (question_lines[:2] + answer_lines[:3]):
+        cv2.putText(
+            vis_img,
+            line,
+            (20, y_offset),
+            font,
             0.7,
             (255, 255, 255),
             2,
@@ -253,6 +318,8 @@ def save_open_loop_video(
     inference_times,
     output_path,
     fps=5,
+    navigation_text="",
+    navigation_weight=1.0,
 ):
     """Render and save the open-loop inference summary video."""
 
@@ -270,10 +337,44 @@ def save_open_loop_video(
                 total_frames=total_frames,
                 inference_time=inference_time,
                 cot_text=cot_text,
+                navigation_text=navigation_text,
+                navigation_weight=navigation_weight,
             )
         )
         if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
             print(f"  Rendering frame {frame_index}/{total_frames}...")
+
+    recorder.save()
+
+
+def save_open_loop_vqa_video(
+    camera_images,
+    answer_texts,
+    inference_times,
+    question,
+    output_path,
+    fps=5,
+):
+    """Render and save an answer-only open-loop VQA video."""
+
+    total_frames = len(camera_images)
+    recorder = VideoRecorder(output_path, fps=fps)
+    for frame_index, (cam_img, answer, inference_time) in enumerate(
+        zip(camera_images, answer_texts, inference_times, strict=True),
+        start=1,
+    ):
+        recorder.add_frame(
+            create_open_loop_vqa_frame(
+                cam_img=cam_img,
+                frame_count=frame_index,
+                total_frames=total_frames,
+                inference_time=inference_time,
+                question=question,
+                answer=answer,
+            )
+        )
+        if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
+            print(f"  Rendering VQA frame {frame_index}/{total_frames}...")
 
     recorder.save()
 
