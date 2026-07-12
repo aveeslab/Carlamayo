@@ -1,3 +1,4 @@
+import argparse
 import os
 import queue
 import random
@@ -38,6 +39,48 @@ SENSOR_CONFIGS = {
     "cam_rear_wide": {"x": -1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 180.0, "fov": 120},
     "cam_rear_tele": {"x": -1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 180.0, "fov": 30},
 }
+
+
+def parse_args(argv=None):
+    """Parse finite, reproducible CARLA data-collection options."""
+
+    parser = argparse.ArgumentParser(description="Collect synchronized CARLA sensor data.")
+    parser.add_argument("--map", dest="map_name", default="Town02", help="CARLA map name.")
+    parser.add_argument(
+        "--weather",
+        default=None,
+        help="Exact carla.WeatherParameters preset name, for example HardRainNoon.",
+    )
+    parser.add_argument(
+        "--frames",
+        type=int,
+        default=None,
+        help="Stop after this many complete synchronized frames. Default: unlimited.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default=OUTPUT_DIR,
+        help=f"Dataset output directory. Default: {OUTPUT_DIR}.",
+    )
+    args = parser.parse_args(argv)
+    if args.frames is not None and args.frames <= 0:
+        parser.error("--frames must be a positive integer.")
+    return args
+
+
+def resolve_weather(name, carla_module=carla):
+    """Resolve one exact CARLA weather preset without silently falling back."""
+
+    weather = getattr(carla_module.WeatherParameters, name, None)
+    if weather is None:
+        raise ValueError(f"Unknown CARLA weather preset: {name}")
+    return weather
+
+
+def capture_complete(recorded_frames, frame_limit):
+    """Return whether the requested number of complete frames has been recorded."""
+
+    return frame_limit is not None and recorded_frames >= frame_limit
 
 
 def sensor_callback(sensor_data, sensor_queue, sensor_name):
@@ -125,7 +168,8 @@ def spawn_npc(client, world, tm_port, num_vehicles, num_walkers):
     return actor_list
 
 
-def main():
+def main(argv=None):
+    args = parse_args(argv)
     actor_list = []
     sensor_list = []
     trajectory_data = {}
@@ -133,24 +177,37 @@ def main():
     client = None
     world = None
     tm = None
+    recorded_frames = 0
+    output_dir = args.output_dir
 
     try:
         client = carla.Client("localhost", 2000)
         client.set_timeout(20.0)
-        world = client.load_world("Town02")
+        world = client.load_world(args.map_name)
         bp_lib = world.get_blueprint_library()
 
-        if not os.path.exists(OUTPUT_DIR):
-            os.makedirs(OUTPUT_DIR)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         for name in SENSOR_CONFIGS.keys():
-            os.makedirs(os.path.join(OUTPUT_DIR, name), exist_ok=True)
-        os.makedirs(os.path.join(OUTPUT_DIR, "lidar_top"), exist_ok=True)
+            os.makedirs(os.path.join(output_dir, name), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, "lidar_top"), exist_ok=True)
 
         # Settings
         settings = world.get_settings()
         settings.synchronous_mode = True
         settings.fixed_delta_seconds = FIXED_DELTA_SECONDS
         world.apply_settings(settings)
+
+        if args.weather is not None:
+            world.set_weather(resolve_weather(args.weather))
+            world.tick()
+            applied_weather = world.get_weather()
+            print(
+                f"Weather: {args.weather} | "
+                f"cloudiness={applied_weather.cloudiness:.1f} "
+                f"precipitation={applied_weather.precipitation:.1f} "
+                f"wetness={applied_weather.wetness:.1f}"
+            )
 
         tm = client.get_trafficmanager(8000)
         tm.set_synchronous_mode(True)
@@ -187,6 +244,7 @@ def main():
             cam_bp.set_attribute("image_size_x", str(IMAGE_WIDTH))
             cam_bp.set_attribute("image_size_y", str(IMAGE_HEIGHT))
             cam_bp.set_attribute("fov", str(cfg["fov"]))
+            cam_bp.set_attribute("enable_postprocess_effects", "True")
             cam_bp.set_attribute("sensor_tick", "0.0")
 
             transform = carla.Transform(
@@ -250,18 +308,18 @@ def main():
             for name in expected_sensor_names:
                 data = current_frame_data[name]
                 if "lidar" in name:
-                    data.save_to_disk(frame_file_path(OUTPUT_DIR, name, frame_id))
+                    data.save_to_disk(frame_file_path(output_dir, name, frame_id))
                 else:
                     array = np.frombuffer(data.raw_data, dtype=np.dtype("uint8"))
                     array = np.reshape(array, (data.height, data.width, 4))
                     array = array[:, :, :3]
-                    filename = frame_file_path(OUTPUT_DIR, name, frame_id)
+                    filename = frame_file_path(output_dir, name, frame_id)
                     if not cv2.imwrite(filename, array):
                         print(f"Warning: Failed to write image for {name} frame {frame_id}.")
                         frame_write_ok = False
 
             # Record pose only after all sensor files are confirmed on disk.
-            if frame_write_ok and frame_is_complete(OUTPUT_DIR, expected_sensor_names, frame_id):
+            if frame_write_ok and frame_is_complete(output_dir, expected_sensor_names, frame_id):
                 trajectory_data[frame_id] = {
                     "x": round(tf.location.x, 6),
                     "y": round(tf.location.y, 6),
@@ -270,6 +328,10 @@ def main():
                     "yaw": round(tf.rotation.yaw, 6),
                     "roll": round(tf.rotation.roll, 6),
                 }
+                recorded_frames += 1
+                if capture_complete(recorded_frames, args.frames):
+                    print(f"Reached requested complete frame count: {recorded_frames}")
+                    break
             else:
                 print(f"Warning: Incomplete frame {frame_id}; excluded from trajectory.json.")
 
@@ -282,7 +344,7 @@ def main():
             filtered_trajectory_data = {}
             dropped = 0
             for frame_id, pose in trajectory_data.items():
-                if frame_is_complete(OUTPUT_DIR, expected_sensor_names, int(frame_id)):
+                if frame_is_complete(output_dir, expected_sensor_names, int(frame_id)):
                     filtered_trajectory_data[frame_id] = pose
                 else:
                     dropped += 1
@@ -290,7 +352,7 @@ def main():
             if dropped > 0:
                 print(f"Dropped {dropped} incomplete frame(s) from trajectory.json.")
 
-            json_path = os.path.join(OUTPUT_DIR, "trajectory.json")
+            json_path = os.path.join(output_dir, "trajectory.json")
             with open(json_path, "w") as f:
                 json.dump(filtered_trajectory_data, f, indent=4)
 
