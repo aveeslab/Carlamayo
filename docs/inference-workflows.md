@@ -27,6 +27,8 @@ python data_collect.py \
   --map Town10HD_Opt_Flood \
   --weather HardRainNoon \
   --frames 1000 \
+  --port 2020 \
+  --traffic-manager-port 8020 \
   --output-dir carla_data/town10hd_flood_hardrain_1000
 ```
 

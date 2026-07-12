@@ -18,6 +18,9 @@ def test_data_collection_defaults_preserve_existing_behavior():
     assert args.weather is None
     assert args.frames is None
     assert args.output_dir == "carla_data"
+    assert args.host == "localhost"
+    assert args.port == 2000
+    assert args.traffic_manager_port == 8000
 
 
 def test_data_collection_accepts_finite_flood_capture():
@@ -31,6 +34,12 @@ def test_data_collection_accepts_finite_flood_capture():
             "1000",
             "--output-dir",
             "/tmp/town10-flood",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "2020",
+            "--traffic-manager-port",
+            "8020",
         ]
     )
 
@@ -38,6 +47,9 @@ def test_data_collection_accepts_finite_flood_capture():
     assert args.weather == "HardRainNoon"
     assert args.frames == 1000
     assert args.output_dir == "/tmp/town10-flood"
+    assert args.host == "127.0.0.1"
+    assert args.port == 2020
+    assert args.traffic_manager_port == 8020
 
 
 @pytest.mark.parametrize("value", ["0", "-1"])

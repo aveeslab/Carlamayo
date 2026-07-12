@@ -45,6 +45,14 @@ def parse_args(argv=None):
     """Parse finite, reproducible CARLA data-collection options."""
 
     parser = argparse.ArgumentParser(description="Collect synchronized CARLA sensor data.")
+    parser.add_argument("--host", default="localhost", help="CARLA server host.")
+    parser.add_argument("--port", type=int, default=2000, help="CARLA world port.")
+    parser.add_argument(
+        "--traffic-manager-port",
+        type=int,
+        default=8000,
+        help="CARLA Traffic Manager port.",
+    )
     parser.add_argument("--map", dest="map_name", default="Town02", help="CARLA map name.")
     parser.add_argument(
         "--weather",
@@ -181,7 +189,7 @@ def main(argv=None):
     output_dir = args.output_dir
 
     try:
-        client = carla.Client("localhost", 2000)
+        client = carla.Client(args.host, args.port)
         client.set_timeout(20.0)
         world = client.load_world(args.map_name)
         bp_lib = world.get_blueprint_library()
@@ -209,7 +217,7 @@ def main(argv=None):
                 f"wetness={applied_weather.wetness:.1f}"
             )
 
-        tm = client.get_trafficmanager(8000)
+        tm = client.get_trafficmanager(args.traffic_manager_port)
         tm.set_synchronous_mode(True)
         tm.set_global_distance_to_leading_vehicle(2.5)
 
