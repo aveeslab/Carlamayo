@@ -20,6 +20,20 @@ source venv-carla/bin/activate
 python data_collect.py
 ```
 
+For a finite capture on a specific map and weather preset:
+
+```bash
+python data_collect.py \
+  --map Town10HD_Opt_Flood \
+  --weather HardRainNoon \
+  --frames 1000 \
+  --output-dir carla_data/town10hd_flood_hardrain_1000
+```
+
+`--frames` counts only complete synchronized records. Missing sensor packets do
+not consume the requested count. RGB cameras are recorded with CARLA
+post-processing effects enabled.
+
 Outputs:
 
 - `carla_data/trajectory.json`
@@ -37,6 +51,60 @@ source a1_5_venv/bin/activate
 python carlamayo_open_loop.py
 ```
 
+The open-loop runner supports three modes through one entry point. `nav` is an
+alias for `navigation`.
+
+Normal trajectory and Chain-of-Causation inference:
+
+```bash
+python carlamayo_open_loop.py \
+  --mode normal \
+  --data-root carla_data/town10hd_flood_hardrain_1000 \
+  --output-video normal.mp4
+```
+
+Navigation-conditioned trajectory inference applies one instruction to every
+recorded frame:
+
+```bash
+python carlamayo_open_loop.py \
+  --mode navigation \
+  --navigation-text "Proceed cautiously through standing water" \
+  --navigation-weight 1.0 \
+  --data-root carla_data/town10hd_flood_hardrain_1000 \
+  --output-video navigation.mp4
+```
+
+VQA applies one question to every recorded frame. It does not run trajectory
+inference; the video contains only the question and answer, and the JSON keeps
+the full answer, CARLA frame ID, and inference time for each frame:
+
+```bash
+python carlamayo_open_loop.py \
+  --mode vqa \
+  --vqa-question "Is the road flooded?" \
+  --temperature 0 \
+  --data-root carla_data/town10hd_flood_hardrain_1000 \
+  --output-video flood_vqa.mp4 \
+  --output-json flood_vqa.json
+```
+
+Temperature zero selects deterministic decoding. A VQA JSON checkpoint is
+atomically replaced after every completed frame so an interrupted long run
+retains its finished answers.
+
+### Open-loop image contract
+
+Alpamayo receives four temporal images from each of four separate cameras:
+front-left, front-wide, front-right, and front-telephoto. The resulting tensor
+layout is `4 cameras x 4 frames x 3 RGB channels`, with camera IDs
+`[0, 1, 2, 6]` supplied to match Alpamayo's training labels.
+
+These individual JPEGs retain CARLA rendering post-processing. They are called
+raw inputs only to distinguish them from the composed result MP4. A composed
+video is not a model-equivalent RGB input: it collapses camera and time axes,
+omits three views, and may contain trajectory or reasoning overlays.
+
 Optional 4-bit quantized mode:
 
 ```bash
@@ -53,6 +121,7 @@ python carlamayo_open_loop.py --oom-free
 Output:
 
 - `carla_alpamayo_open_loop_result.mp4`
+- In VQA mode, the configured MP4 plus a frame-by-frame JSON result file
 
 ## 3. Closed-Loop Inference
 

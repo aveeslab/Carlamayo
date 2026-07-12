@@ -34,3 +34,6 @@ no-build-isolation-package = ["flash-attn"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
