@@ -15,6 +15,7 @@ import torch
 
 from module import config as cfg
 from module.open_loop_dataset import (
+    OPEN_LOOP_CAMERA_INDICES,
     load_front_camera_image,
     load_open_loop_arrays,
     load_trajectory_index,
@@ -155,14 +156,23 @@ def load_model_input(data_root, trajectory, frame_ids, frame_index):
         num_history_steps=cfg.NUM_HISTORY,
         num_frames=cfg.NUM_FRAMES,
     )
-    return prepare_model_input(
+    model_input = prepare_model_input(
         arrays["image_frames"],
         arrays["history_xyz"],
         arrays["history_rot"],
     )
+    model_input["camera_indices"] = torch.tensor(OPEN_LOOP_CAMERA_INDICES, dtype=torch.long)
+    return model_input
 
 
-def run_single_frame(model, processor, model_input):
+def run_trajectory_frame(
+    model,
+    processor,
+    model_input,
+    navigation_text=None,
+    navigation_weight=1.0,
+    temperature=0.0,
+):
     """Run Alpamayo once and return trajectory samples, CoT text, and latency."""
 
     from module.inference import extract_cot_text, extract_trajectory_samples, run_inference
@@ -173,11 +183,32 @@ def run_single_frame(model, processor, model_input):
         model,
         processor,
         model_input,
+        navigation_text=navigation_text,
+        navigation_weight=navigation_weight,
+        temperature=temperature,
         disable_unused_generate_logits=True,
         vlm_image_pixels=cfg.VLM_IMAGE_PIXELS,
     )
     inference_time = time.perf_counter() - inference_start
     return extract_trajectory_samples(pred_xyz), extract_cot_text(extra), inference_time
+
+
+def run_vqa_frame(model, processor, model_input, question, temperature=0.0):
+    """Run Alpamayo VQA once and return answer text and latency."""
+
+    from module.inference import extract_answer_text, run_vqa
+
+    torch.cuda.manual_seed_all(42)
+    inference_start = time.perf_counter()
+    extra = run_vqa(
+        model,
+        processor,
+        model_input,
+        question=question,
+        temperature=temperature,
+    )
+    inference_time = time.perf_counter() - inference_start
+    return extract_answer_text(extra), inference_time
 
 
 def load_open_loop_model(args):
@@ -241,7 +272,14 @@ def main():
         print(f"  Frame {display_index}/{frames_to_process} (CARLA frame={frame_id})")
 
         model_input = load_model_input(args.data_root, trajectory, frame_ids, frame_index)
-        pred_xyz, cot_text, inference_time = run_single_frame(model, processor, model_input)
+        pred_xyz, cot_text, inference_time = run_trajectory_frame(
+            model,
+            processor,
+            model_input,
+            navigation_text=args.navigation_text if args.mode == "navigation" else None,
+            navigation_weight=args.navigation_weight,
+            temperature=args.temperature,
+        )
 
         predictions.append(pred_xyz)
         cot_texts.append(cot_text)

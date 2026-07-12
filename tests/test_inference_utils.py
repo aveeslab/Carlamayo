@@ -1,3 +1,6 @@
+import copy
+from contextlib import nullcontext
+
 import numpy as np
 import pytest
 import torch
@@ -70,3 +73,84 @@ def test_select_trajectory_by_prev_similarity_prefers_closest_xy_path():
 
     assert best_idx == 1
     assert scores[1] < scores[0]
+
+
+def test_run_inference_forwards_temperature(monkeypatch):
+    captured = {}
+
+    class Processor:
+        def apply_chat_template(self, *args, **kwargs):
+            return {"input_ids": torch.tensor([[1, 2]])}
+
+    class Model:
+        def sample_trajectories_from_data_with_vlm_rollout(self, **kwargs):
+            captured.update(kwargs)
+            return torch.zeros((1, 1, 1, 2, 3)), None, {}
+
+    monkeypatch.setattr(inference, "optimized_vlm_generate", lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(inference.torch, "autocast", lambda *args, **kwargs: nullcontext())
+
+    inference.run_inference(Model(), Processor(), _minimal_model_input(), temperature=0.0)
+
+    assert captured["temperature"] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("temperature", "expected_sampling", "expected_temperature"),
+    [(0.0, False, None), (0.4, True, 0.4)],
+)
+def test_vqa_generation_selects_decoding_mode(
+    temperature, expected_sampling, expected_temperature
+):
+    class GenerationConfig:
+        top_p = None
+        temperature = None
+        do_sample = None
+        num_return_sequences = None
+        max_new_tokens = None
+        output_logits = None
+        return_dict_in_generate = None
+        top_k = None
+        pad_token_id = None
+
+        def __deepcopy__(self, memo):
+            duplicate = GenerationConfig()
+            duplicate.__dict__.update(copy.deepcopy(self.__dict__, memo))
+            return duplicate
+
+    class VLM:
+        generation_config = GenerationConfig()
+        seen_config = None
+
+        def generate(self, input_ids, generation_config, **kwargs):
+            self.seen_config = generation_config
+            return {"sequences": torch.tensor([[1, 2, 3]])}
+
+    class Tokenizer:
+        pad_token_id = 0
+
+        def batch_decode(self, generated_tokens, skip_special_tokens=False):
+            return ["<|answer_start|>Yes.<|answer_end|>"]
+
+    class Model:
+        vlm = VLM()
+        tokenizer = Tokenizer()
+
+    model = Model()
+    result = inference._generate_vqa_text_with_partial_answer_fallback(
+        model,
+        {"tokenized_data": {"input_ids": torch.tensor([[1, 2]])}},
+        temperature=temperature,
+    )
+
+    assert result["answer"].tolist() == [["Yes."]]
+    assert model.vlm.seen_config.do_sample is expected_sampling
+    assert model.vlm.seen_config.temperature == expected_temperature
+
+
+def _minimal_model_input():
+    return {
+        "image_frames": torch.zeros((4, 4, 3, 2, 2), dtype=torch.uint8),
+        "ego_history_xyz": torch.zeros((1, 1, 16, 3)),
+        "ego_history_rot": torch.zeros((1, 1, 16, 3, 3)),
+    }

@@ -120,6 +120,7 @@ def run_inference(
     data,
     navigation_text: str | None = None,
     navigation_weight: float = 1.0,
+    temperature: float = 0.6,
     vlm_generate_timing: VlmGenerateTiming | None = None,
     disable_unused_generate_logits: bool = True,
     vlm_image_pixels: int | None = None,
@@ -190,7 +191,7 @@ def run_inference(
         pred_xyz, pred_rot, extra = inference_fn(
             data=model_inputs,
             top_p=0.98,
-            temperature=0.6,
+            temperature=temperature,
             num_traj_samples=cfg.NUM_TRAJ_SAMPLES,
             diffusion_kwargs=diffusion_kwargs,
             max_generation_length=256,
@@ -275,14 +276,15 @@ def _generate_vqa_text_with_partial_answer_fallback(
     input_ids = tokenized_data.pop("input_ids")
 
     generation_config = copy.deepcopy(model.vlm.generation_config)
-    generation_config.top_p = top_p
-    generation_config.temperature = temperature
-    generation_config.do_sample = True
+    do_sample = temperature > 0
+    generation_config.top_p = top_p if do_sample else None
+    generation_config.temperature = temperature if do_sample else None
+    generation_config.do_sample = do_sample
     generation_config.num_return_sequences = num_samples
     generation_config.max_new_tokens = max_generation_length
     generation_config.output_logits = False
     generation_config.return_dict_in_generate = True
-    generation_config.top_k = top_k
+    generation_config.top_k = top_k if do_sample else None
     generation_config.pad_token_id = model.tokenizer.pad_token_id
 
     generated = model.vlm.generate(
@@ -328,6 +330,7 @@ def run_vqa(
     processor,
     data,
     question: str,
+    temperature: float = 0.6,
 ):
     """Run Alpamayo VQA text generation for a driving-relevant question."""
 
@@ -357,14 +360,14 @@ def run_vqa(
                 model,
                 model_inputs,
                 top_p=0.98,
-                temperature=0.6,
+                temperature=temperature,
                 num_samples=1,
                 max_generation_length=256,
             )
         return model.generate_text(
             data=model_inputs,
             top_p=0.98,
-            temperature=0.6,
+            temperature=temperature,
             num_samples=1,
             max_generation_length=256,
         )

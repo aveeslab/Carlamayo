@@ -15,6 +15,7 @@ OPEN_LOOP_CAMERA_ORDER = (
     "cam_front_right",
     "cam_front_tele",
 )
+OPEN_LOOP_CAMERA_INDICES = (0, 1, 2, 6)
 FRONT_CAMERA_NAME = "cam_front_wide"
 
 
