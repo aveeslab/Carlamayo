@@ -1,5 +1,8 @@
 from pathlib import Path
 
+import gc
+import weakref
+
 import numpy as np
 import pytest
 import torch
@@ -154,12 +157,48 @@ def test_save_open_loop_vqa_video_writes_nonempty_video(tmp_path):
     output = tmp_path / "vqa.mp4"
 
     visualization.save_open_loop_vqa_video(
-        [np.zeros((240, 640, 3), dtype=np.uint8)],
+        (image for image in [np.zeros((240, 640, 3), dtype=np.uint8)]),
         ["Yes"],
         [0.5],
         "Is it flooded?",
         output,
         fps=5,
+        total_frames=1,
     )
 
     assert output.stat().st_size > 0
+
+
+def test_video_recorder_does_not_retain_added_frames(tmp_path):
+    recorder = visualization.VideoRecorder(tmp_path / "streamed.mp4", fps=5)
+    frame = np.zeros((240, 640, 3), dtype=np.uint8)
+    frame_reference = weakref.ref(frame)
+
+    recorder.add_frame(frame)
+    del frame
+    gc.collect()
+
+    assert frame_reference() is None
+    recorder.save()
+
+
+def test_streaming_video_removes_partial_file_on_render_error(tmp_path):
+    output = tmp_path / "broken.mp4"
+
+    def broken_images():
+        yield np.zeros((240, 640, 3), dtype=np.uint8)
+        raise RuntimeError("corrupt input")
+
+    with pytest.raises(RuntimeError, match="corrupt input"):
+        visualization.save_open_loop_vqa_video(
+            broken_images(),
+            ["Yes", "No"],
+            [0.5, 0.6],
+            "Is it flooded?",
+            output,
+            fps=5,
+            total_frames=2,
+        )
+
+    assert not output.exists()
+    assert not list(tmp_path.glob(".*opencv-tmp.mp4"))

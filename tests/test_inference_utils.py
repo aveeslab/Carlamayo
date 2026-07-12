@@ -75,7 +75,23 @@ def test_select_trajectory_by_prev_similarity_prefers_closest_xy_path():
     assert scores[1] < scores[0]
 
 
-def test_run_inference_forwards_temperature(monkeypatch):
+def test_run_inference_rejects_zero_temperature_before_upstream_sampling(monkeypatch):
+    class Processor:
+        def apply_chat_template(self, *args, **kwargs):
+            return {"input_ids": torch.tensor([[1, 2]])}
+
+    class Model:
+        def sample_trajectories_from_data_with_vlm_rollout(self, **kwargs):
+            pytest.fail("upstream trajectory sampler received zero temperature")
+
+    monkeypatch.setattr(inference, "optimized_vlm_generate", lambda *args, **kwargs: nullcontext())
+    monkeypatch.setattr(inference.torch, "autocast", lambda *args, **kwargs: nullcontext())
+
+    with pytest.raises(ValueError, match="trajectory temperature must be greater than zero"):
+        inference.run_inference(Model(), Processor(), _minimal_model_input(), temperature=0.0)
+
+
+def test_run_inference_preserves_positive_temperature(monkeypatch):
     captured = {}
 
     class Processor:
@@ -90,9 +106,9 @@ def test_run_inference_forwards_temperature(monkeypatch):
     monkeypatch.setattr(inference, "optimized_vlm_generate", lambda *args, **kwargs: nullcontext())
     monkeypatch.setattr(inference.torch, "autocast", lambda *args, **kwargs: nullcontext())
 
-    inference.run_inference(Model(), Processor(), _minimal_model_input(), temperature=0.0)
+    inference.run_inference(Model(), Processor(), _minimal_model_input(), temperature=0.4)
 
-    assert captured["temperature"] == 0.0
+    assert captured["temperature"] == 0.4
 
 
 @pytest.mark.parametrize(

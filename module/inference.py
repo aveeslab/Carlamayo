@@ -131,6 +131,9 @@ def run_inference(
     uses Alpamayo's CFG navigation path when it differs from 1.0.
     """
 
+    if not math.isfinite(float(temperature)) or float(temperature) <= 0:
+        raise ValueError("trajectory temperature must be greater than zero")
+
     nav_text = navigation_text.strip() if isinstance(navigation_text, str) else ""
     if not math.isfinite(float(navigation_weight)) or float(navigation_weight) < 0:
         raise ValueError("navigation_weight must be a non-negative finite number")

@@ -46,7 +46,7 @@ import carlamayo_open_loop as open_loop
 def test_open_loop_defaults_to_normal_mode():
     args = open_loop.parse_args([])
     assert args.mode == "normal"
-    assert args.temperature == 0.0
+    assert args.temperature == 0.6
     assert args.output_json is None
 
 
@@ -112,13 +112,15 @@ def parse_args(argv=None):
     parser.add_argument("--navigation-text", default="")
     parser.add_argument("--navigation-weight", type=float, default=1.0)
     parser.add_argument("--vqa-question", default="")
-    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--output-json")
     # Preserve all existing arguments.
     args = parser.parse_args(argv)
     args.mode = "navigation" if args.mode == "nav" else args.mode
     args.navigation_text = args.navigation_text.strip()
     args.vqa_question = args.vqa_question.strip()
+    if args.temperature is None:
+        args.temperature = 0.0 if args.mode == "vqa" else 0.6
     if args.mode == "navigation" and not args.navigation_text:
         parser.error("--navigation-text is required in navigation mode.")
     if args.mode == "vqa" and not args.vqa_question:
@@ -187,11 +189,11 @@ def test_navigation_frame_forwards_prompt_weight_and_temperature(monkeypatch):
     fake = Mock(return_value=(torch.zeros((1, 1, 1, 2, 3)), {"cot": ["safe"]}))
     monkeypatch.setattr("module.inference.run_inference", fake)
     open_loop.run_trajectory_frame(
-        object(), object(), {}, navigation_text="Turn left", navigation_weight=1.4, temperature=0.0
+        object(), object(), {}, navigation_text="Turn left", navigation_weight=1.4
     )
     assert fake.call_args.kwargs["navigation_text"] == "Turn left"
     assert fake.call_args.kwargs["navigation_weight"] == 1.4
-    assert fake.call_args.kwargs["temperature"] == 0.0
+    assert fake.call_args.kwargs["temperature"] == 0.6
 ```
 
 In `tests/test_inference_utils.py`, use a fake model/processor to assert that `run_vqa(..., temperature=0.0)` reaches the deterministic generation helper and positive temperature retains sampling.
@@ -224,7 +226,8 @@ return model_input
 
 - [ ] **Step 4: Add temperature-aware inference APIs**
 
-Keep shared defaults backward compatible (`0.6`) and let the open-loop CLI explicitly pass its default `0.0`:
+Keep trajectory defaults backward compatible at `0.6`; use `0.0` only for
+deterministic VQA decoding:
 
 ```python
 def run_inference(..., temperature: float = 0.6, ...):
@@ -263,7 +266,7 @@ def run_trajectory_frame(
     model_input,
     navigation_text=None,
     navigation_weight=1.0,
-    temperature=0.0,
+    temperature=0.6,
 ):
     pred_xyz, extra = run_inference(
         model,

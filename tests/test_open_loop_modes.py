@@ -6,6 +6,7 @@ import numpy as np
 import torch
 
 import carlamayo_open_loop as open_loop
+from module import config as cfg
 from module import open_loop_dataset
 
 
@@ -13,8 +14,16 @@ def test_open_loop_defaults_to_normal_mode():
     args = open_loop.parse_args([])
 
     assert args.mode == "normal"
-    assert args.temperature == 0.0
+    assert args.temperature == 0.6
     assert args.output_json is None
+
+
+def test_vqa_defaults_to_deterministic_temperature():
+    args = open_loop.parse_args(
+        ["--mode", "vqa", "--vqa-question", "Is the road flooded?"]
+    )
+
+    assert args.temperature == 0.0
 
 
 def test_nav_alias_normalizes_to_navigation():
@@ -60,10 +69,123 @@ def test_vqa_derives_json_path_from_output_video():
     assert args.output_json == "run.json"
 
 
+def test_vqa_rejects_identical_video_and_json_paths(tmp_path):
+    output = tmp_path / "result.bin"
+
+    with pytest.raises(SystemExit):
+        open_loop.parse_args(
+            [
+                "--mode",
+                "vqa",
+                "--vqa-question",
+                "Is the road flooded?",
+                "--output-video",
+                str(output),
+                "--output-json",
+                str(output),
+            ]
+        )
+
+
+def test_output_rejects_dataset_trajectory_path(tmp_path):
+    with pytest.raises(SystemExit):
+        open_loop.parse_args(
+            [
+                "--data-root",
+                str(tmp_path),
+                "--output-video",
+                str(tmp_path / "trajectory.json"),
+            ]
+        )
+
+
+@pytest.mark.parametrize(
+    "relative_output",
+    [
+        "cam_front_wide/000001.jpg",
+        "cam_rear_left/000001.jpg",
+        "lidar_top/000001.ply",
+    ],
+)
+def test_output_rejects_sensor_directory_path(tmp_path, relative_output):
+    with pytest.raises(SystemExit):
+        open_loop.parse_args(
+            [
+                "--data-root",
+                str(tmp_path),
+                "--output-video",
+                str(tmp_path / relative_output),
+            ]
+        )
+
+
+def test_output_rejects_symlink_into_dataset(tmp_path):
+    data_root = tmp_path / "dataset"
+    data_root.mkdir()
+    protected_target = data_root / "recorded-source.bin"
+    protected_target.write_bytes(b"source")
+    output_alias = tmp_path / "output.mp4"
+    output_alias.symlink_to(protected_target)
+
+    with pytest.raises(SystemExit):
+        open_loop.parse_args(
+            [
+                "--data-root",
+                str(data_root),
+                "--output-video",
+                str(output_alias),
+            ]
+        )
+
+
+def test_output_rejects_dataset_manifest_symlinked_outside(tmp_path):
+    data_root = tmp_path / "dataset"
+    data_root.mkdir()
+    external_manifest = tmp_path / "external-trajectory.json"
+    external_manifest.write_text("{}")
+    (data_root / "trajectory.json").symlink_to(external_manifest)
+
+    with pytest.raises(SystemExit):
+        open_loop.parse_args(
+            [
+                "--data-root",
+                str(data_root),
+                "--output-video",
+                str(external_manifest),
+            ]
+        )
+
+
+def test_output_rejects_dataset_sensor_directory_symlinked_outside(tmp_path):
+    data_root = tmp_path / "dataset"
+    data_root.mkdir()
+    external_camera = tmp_path / "external-camera"
+    external_camera.mkdir()
+    source_image = external_camera / "000001.jpg"
+    source_image.write_bytes(b"source")
+    (data_root / "cam_front_wide").symlink_to(external_camera, target_is_directory=True)
+
+    with pytest.raises(SystemExit):
+        open_loop.parse_args(
+            [
+                "--data-root",
+                str(data_root),
+                "--output-video",
+                str(source_image),
+            ]
+        )
+
+
 @pytest.mark.parametrize("value", ["-0.1", "nan", "inf"])
 def test_temperature_must_be_nonnegative_and_finite(value):
     with pytest.raises(SystemExit):
         open_loop.parse_args(["--temperature", value])
+
+
+@pytest.mark.parametrize("mode_args", [[], ["--mode", "nav", "--navigation-text", "Go"]])
+def test_trajectory_modes_reject_zero_temperature(mode_args):
+    with pytest.raises(SystemExit):
+        open_loop.parse_args([*mode_args, "--temperature", "0"])
 
 
 @pytest.mark.parametrize("value", ["-0.1", "nan", "inf"])
@@ -79,6 +201,12 @@ def test_output_json_is_rejected_outside_vqa():
 
 def test_open_loop_camera_indices_match_training_camera_labels():
     assert open_loop_dataset.OPEN_LOOP_CAMERA_INDICES == (0, 1, 2, 6)
+
+
+def test_vqa_processes_all_frames_but_trajectory_modes_require_full_history():
+    assert open_loop.get_start_index("vqa") == 0
+    assert open_loop.get_start_index("normal") == cfg.NUM_FRAMES - 1
+    assert open_loop.get_start_index("navigation") == cfg.NUM_FRAMES - 1
 
 
 def test_load_model_input_attaches_camera_indices(tmp_path, monkeypatch):
@@ -109,12 +237,11 @@ def test_navigation_frame_forwards_prompt_weight_and_temperature(monkeypatch):
         {},
         navigation_text="Turn left",
         navigation_weight=1.4,
-        temperature=0.0,
     )
 
     assert calls[0]["navigation_text"] == "Turn left"
     assert calls[0]["navigation_weight"] == 1.4
-    assert calls[0]["temperature"] == 0.0
+    assert calls[0]["temperature"] == 0.6
 
 
 def test_vqa_frame_returns_only_extracted_answer_and_latency(monkeypatch):
@@ -156,6 +283,7 @@ def test_vqa_main_processes_every_frame_without_trajectory_inference(tmp_path, m
     frame_ids = [101, 102]
     answers = iter([("No standing water.", 0.4), ("Yes, flooding is visible.", 0.5)])
     captured_video = {}
+    data_root = tmp_path / "dataset"
 
     monkeypatch.setattr(open_loop, "load_trajectory_index", lambda data_root: ({}, frame_ids))
     monkeypatch.setattr(open_loop, "load_open_loop_model", lambda args: (object(), object()))
@@ -173,9 +301,12 @@ def test_vqa_main_processes_every_frame_without_trajectory_inference(tmp_path, m
     )
     monkeypatch.setattr(
         "module.visualization.save_open_loop_vqa_video",
-        lambda camera_images, answer_texts, inference_times, question, output_path, fps=5: (
+        lambda camera_images, answer_texts, inference_times, question, output_path, fps=5, total_frames=None: (
             captured_video.update(
-                images=len(camera_images), answers=list(answer_texts), question=question
+                images=len(list(camera_images)),
+                answers=list(answer_texts),
+                question=question,
+                total_frames=total_frames,
             )
         ),
         raising=False,
@@ -189,7 +320,7 @@ def test_vqa_main_processes_every_frame_without_trajectory_inference(tmp_path, m
             "--vqa-question",
             "Is the road flooded?",
             "--data-root",
-            str(tmp_path),
+            str(data_root),
             "--output-video",
             str(tmp_path / "answers.mp4"),
             "--output-json",
@@ -203,4 +334,5 @@ def test_vqa_main_processes_every_frame_without_trajectory_inference(tmp_path, m
         "images": 2,
         "answers": ["No standing water.", "Yes, flooding is visible."],
         "question": "Is the road flooded?",
+        "total_frames": 2,
     }

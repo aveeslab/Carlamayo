@@ -3,6 +3,7 @@ import os
 import queue
 import random
 import json
+import math
 
 import carla
 import cv2
@@ -101,13 +102,20 @@ def resolve_weather(name, carla_module=carla):
     return weather
 
 
-def _weather_matches(expected, actual, tolerance=0.1):
+def _weather_matches(expected, actual, relative_tolerance=1e-4, absolute_tolerance=1e-4):
     compared = False
     for field in WEATHER_FIELDS:
-        if not hasattr(expected, field) or not hasattr(actual, field):
+        if not hasattr(expected, field):
             continue
+        if not hasattr(actual, field):
+            return False
         compared = True
-        if abs(float(getattr(expected, field)) - float(getattr(actual, field))) > tolerance:
+        if not math.isclose(
+            float(getattr(expected, field)),
+            float(getattr(actual, field)),
+            rel_tol=relative_tolerance,
+            abs_tol=absolute_tolerance,
+        ):
             return False
     return compared
 

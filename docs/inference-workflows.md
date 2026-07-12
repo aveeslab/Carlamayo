@@ -66,7 +66,7 @@ python carlamayo_open_loop.py \
 ```
 
 Navigation-conditioned trajectory inference applies one instruction to every
-recorded frame:
+selected frame after the initial four-frame history is available:
 
 ```bash
 python carlamayo_open_loop.py \
@@ -91,9 +91,21 @@ python carlamayo_open_loop.py \
   --output-json flood_vqa.json
 ```
 
-Temperature zero selects deterministic decoding. A VQA JSON checkpoint is
-atomically replaced after every completed frame so an interrupted long run
-retains its finished answers.
+Temperature zero selects deterministic VQA decoding. Trajectory modes retain
+Alpamayo's positive sampling temperature (default `0.6`) because the upstream
+trajectory generator produces multiple sampled rollouts and does not accept
+zero. A VQA JSON checkpoint is atomically replaced after every completed frame
+so an interrupted long run retains its finished answers.
+
+VQA evaluates every recorded frame using edge-padded history. Normal and
+navigation modes preserve the original behavior of starting only after a full
+four-frame history exists. Result videos are written incrementally, so a
+1,000-frame 1080p run does not retain the complete source and overlay videos in
+memory.
+
+Place `--output-video` and `--output-json` outside `--data-root`. The runner
+rejects dataset-internal outputs so recorded camera, LiDAR, and trajectory files
+cannot be overwritten by a result artifact.
 
 ### Open-loop image contract
 

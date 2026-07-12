@@ -320,29 +320,34 @@ def save_open_loop_video(
     fps=5,
     navigation_text="",
     navigation_weight=1.0,
+    total_frames=None,
 ):
     """Render and save the open-loop inference summary video."""
 
-    total_frames = len(predictions)
+    total_frames = len(predictions) if total_frames is None else int(total_frames)
     recorder = VideoRecorder(output_path, fps=fps)
-    for frame_index, (pred_xyz, cam_img, cot_text, inference_time) in enumerate(
-        zip(predictions, camera_images, cot_texts, inference_times, strict=True),
-        start=1,
-    ):
-        recorder.add_frame(
-            create_open_loop_visualization_frame(
-                cam_img=cam_img,
-                pred_xyz=pred_xyz,
-                frame_count=frame_index,
-                total_frames=total_frames,
-                inference_time=inference_time,
-                cot_text=cot_text,
-                navigation_text=navigation_text,
-                navigation_weight=navigation_weight,
+    try:
+        for frame_index, (pred_xyz, cam_img, cot_text, inference_time) in enumerate(
+            zip(predictions, camera_images, cot_texts, inference_times, strict=True),
+            start=1,
+        ):
+            recorder.add_frame(
+                create_open_loop_visualization_frame(
+                    cam_img=cam_img,
+                    pred_xyz=pred_xyz,
+                    frame_count=frame_index,
+                    total_frames=total_frames,
+                    inference_time=inference_time,
+                    cot_text=cot_text,
+                    navigation_text=navigation_text,
+                    navigation_weight=navigation_weight,
+                )
             )
-        )
-        if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
-            print(f"  Rendering frame {frame_index}/{total_frames}...")
+            if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
+                print(f"  Rendering frame {frame_index}/{total_frames}...")
+    except BaseException:
+        recorder.abort()
+        raise
 
     recorder.save()
 
@@ -354,27 +359,37 @@ def save_open_loop_vqa_video(
     question,
     output_path,
     fps=5,
+    total_frames=None,
 ):
     """Render and save an answer-only open-loop VQA video."""
 
-    total_frames = len(camera_images)
+    if total_frames is None:
+        try:
+            total_frames = len(camera_images)
+        except TypeError as exc:
+            raise ValueError("total_frames is required for streamed camera images") from exc
+    total_frames = int(total_frames)
     recorder = VideoRecorder(output_path, fps=fps)
-    for frame_index, (cam_img, answer, inference_time) in enumerate(
-        zip(camera_images, answer_texts, inference_times, strict=True),
-        start=1,
-    ):
-        recorder.add_frame(
-            create_open_loop_vqa_frame(
-                cam_img=cam_img,
-                frame_count=frame_index,
-                total_frames=total_frames,
-                inference_time=inference_time,
-                question=question,
-                answer=answer,
+    try:
+        for frame_index, (cam_img, answer, inference_time) in enumerate(
+            zip(camera_images, answer_texts, inference_times, strict=True),
+            start=1,
+        ):
+            recorder.add_frame(
+                create_open_loop_vqa_frame(
+                    cam_img=cam_img,
+                    frame_count=frame_index,
+                    total_frames=total_frames,
+                    inference_time=inference_time,
+                    question=question,
+                    answer=answer,
+                )
             )
-        )
-        if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
-            print(f"  Rendering VQA frame {frame_index}/{total_frames}...")
+            if frame_index == 1 or frame_index % 10 == 0 or frame_index == total_frames:
+                print(f"  Rendering VQA frame {frame_index}/{total_frames}...")
+    except BaseException:
+        recorder.abort()
+        raise
 
     recorder.save()
 
@@ -415,10 +430,40 @@ class VideoRecorder:
     def __init__(self, output_path, fps=10):
         self.output_path = output_path
         self.fps = fps
-        self.frames = []
+        self.frame_count = 0
+        self._writer = None
+        self._selected_codec = None
+        self._temp_path = None
+        self._resolution = None
+        self._finalized = False
 
     def add_frame(self, frame):
-        self.frames.append(frame)
+        if self._finalized:
+            raise RuntimeError("Cannot add frames after the video has been finalized.")
+
+        height, width = frame.shape[:2]
+        if self._writer is None:
+            output_dir = os.path.dirname(os.path.abspath(self.output_path)) or "."
+            os.makedirs(output_dir, exist_ok=True)
+            self._temp_path = os.path.join(
+                output_dir,
+                f".{os.path.basename(self.output_path)}.opencv-tmp.mp4",
+            )
+            self._writer, self._selected_codec = self._create_writer(
+                width, height, self._temp_path
+            )
+            if self._writer is None:
+                raise RuntimeError("Failed to initialize video writer.")
+            if hasattr(cv2, "VIDEOWRITER_PROP_QUALITY"):
+                self._writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 100)
+            self._resolution = (width, height)
+        elif self._resolution != (width, height):
+            raise ValueError(
+                f"Video frame resolution changed from {self._resolution} to {(width, height)}."
+            )
+
+        self._writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        self.frame_count += 1
 
     def _create_writer(self, width, height, output_path):
         for codec in ("mp4v", "avc1", "H264"):
@@ -429,44 +474,43 @@ class VideoRecorder:
             writer.release()
         return None, None
 
+    def abort(self):
+        """Release an incomplete writer and remove its temporary file."""
+
+        if self._writer is not None:
+            self._writer.release()
+            self._writer = None
+        if self._temp_path and os.path.exists(self._temp_path):
+            os.remove(self._temp_path)
+        self._finalized = True
+
     def save(self):
-        if not self.frames:
+        if self.frame_count == 0:
             print("No frames to save.")
             return
+        if self._finalized:
+            raise RuntimeError("Video has already been finalized.")
 
-        print(f"\nSaving video with {len(self.frames)} frames...")
-        h, w = self.frames[0].shape[:2]
-        output_dir = os.path.dirname(os.path.abspath(self.output_path)) or "."
-        os.makedirs(output_dir, exist_ok=True)
-        temp_path = os.path.join(
-            output_dir,
-            f".{os.path.basename(self.output_path)}.opencv-tmp.mp4",
+        print(f"\nSaving video with {self.frame_count} frames...")
+        self._writer.release()
+        self._writer = None
+        self._finalized = True
+
+        transcoded, transcode_msg = transcode_video_for_browser_compat(
+            self._temp_path, self.output_path
         )
-
-        writer, selected_codec = self._create_writer(w, h, temp_path)
-        if writer is None:
-            print("Failed to initialize video writer.")
-            return
-        if hasattr(cv2, "VIDEOWRITER_PROP_QUALITY"):
-            writer.set(cv2.VIDEOWRITER_PROP_QUALITY, 100)
-
-        for frame in self.frames:
-            writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-
-        writer.release()
-
-        transcoded, transcode_msg = transcode_video_for_browser_compat(temp_path, self.output_path)
         if not transcoded:
-            shutil.move(temp_path, self.output_path)
+            shutil.move(self._temp_path, self.output_path)
             print(
                 f"Warning: H.264 transcode skipped ({transcode_msg}); "
-                f"saved OpenCV {selected_codec} output."
+                f"saved OpenCV {self._selected_codec} output."
             )
         else:
-            os.remove(temp_path)
+            os.remove(self._temp_path)
 
         print(f"Video saved: {self.output_path}")
+        width, height = self._resolution
         print(
-            f"  Codec: {transcode_msg if transcoded else selected_codec}, "
-            f"Resolution: {w}x{h}, FPS: {self.fps}, Frames: {len(self.frames)}"
+            f"  Codec: {transcode_msg if transcoded else self._selected_codec}, "
+            f"Resolution: {width}x{height}, FPS: {self.fps}, Frames: {self.frame_count}"
         )

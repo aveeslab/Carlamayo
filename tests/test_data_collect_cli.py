@@ -68,17 +68,34 @@ def test_unknown_weather_is_rejected():
 
 
 def test_apply_weather_waits_until_all_preset_values_match():
-    preset = types.SimpleNamespace(cloudiness=100.0, precipitation=100.0, wetness=100.0)
+    preset = types.SimpleNamespace(
+        cloudiness=100.0,
+        precipitation=100.0,
+        wetness=100.0,
+        fog_falloff=0.1,
+        mie_scattering_scale=0.03,
+        rayleigh_scattering_scale=0.0331,
+    )
 
     class World:
         def __init__(self):
             self.states = iter(
                 [
                     types.SimpleNamespace(
-                        cloudiness=100.0, precipitation=100.0, wetness=0.0
+                        cloudiness=100.0,
+                        precipitation=100.0,
+                        wetness=100.0,
+                        fog_falloff=0.0,
+                        mie_scattering_scale=0.0,
+                        rayleigh_scattering_scale=0.0,
                     ),
                     types.SimpleNamespace(
-                        cloudiness=100.0, precipitation=100.0, wetness=100.0
+                        cloudiness=100.0,
+                        precipitation=100.0,
+                        wetness=100.0,
+                        fog_falloff=0.1,
+                        mie_scattering_scale=0.03,
+                        rayleigh_scattering_scale=0.0331,
                     ),
                 ]
             )
@@ -118,6 +135,13 @@ def test_apply_weather_raises_when_preset_never_becomes_active():
 
     with pytest.raises(RuntimeError, match="did not become active"):
         data_collect.apply_weather_until_ready(World(), preset, max_ticks=2)
+
+
+def test_weather_match_requires_every_expected_field():
+    expected = types.SimpleNamespace(cloudiness=100.0, precipitation=100.0)
+    actual = types.SimpleNamespace(cloudiness=100.0)
+
+    assert not data_collect._weather_matches(expected, actual)
 
 
 @pytest.mark.parametrize(

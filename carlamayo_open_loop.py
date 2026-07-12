@@ -54,8 +54,11 @@ def parse_args(argv=None):
     parser.add_argument(
         "--temperature",
         type=float,
-        default=0.0,
-        help="Generation temperature. Zero selects deterministic decoding. Default: 0.",
+        default=None,
+        help=(
+            "Generation temperature. Default: 0.6 for trajectory modes and "
+            "0 for deterministic VQA."
+        ),
     )
     parser.add_argument(
         "--data-root",
@@ -125,6 +128,8 @@ def parse_args(argv=None):
     args.mode = "navigation" if args.mode == "nav" else args.mode
     args.navigation_text = args.navigation_text.strip()
     args.vqa_question = args.vqa_question.strip()
+    if args.temperature is None:
+        args.temperature = 0.0 if args.mode == "vqa" else 0.6
 
     if args.mode == "navigation" and not args.navigation_text:
         parser.error("--navigation-text is required in navigation mode.")
@@ -134,13 +139,55 @@ def parse_args(argv=None):
         parser.error("--navigation-weight must be a non-negative finite number.")
     if not math.isfinite(args.temperature) or args.temperature < 0:
         parser.error("--temperature must be a non-negative finite number.")
+    if args.mode != "vqa" and args.temperature == 0:
+        parser.error(
+            "--temperature must be greater than zero in trajectory modes; "
+            "Alpamayo trajectory generation requires sampling."
+        )
     if args.mode == "vqa":
         args.output_json = args.output_json or str(Path(args.output_video).with_suffix(".json"))
     elif args.output_json is not None:
         parser.error("--output-json is only valid in VQA mode.")
+    _validate_output_paths(args, parser)
     if args.oom_free and args.use_quantization:
         parser.error("--oom-free and --quantization are mutually exclusive.")
     return args
+
+
+def _validate_output_paths(args, parser):
+    data_root = Path(args.data_root).expanduser().resolve()
+    output_video = Path(args.output_video).expanduser().resolve()
+    output_json = Path(args.output_json).expanduser().resolve() if args.output_json else None
+    protected_targets = set()
+    protected_directories = []
+    if data_root.is_dir():
+        for source_path in data_root.iterdir():
+            resolved_source = source_path.resolve()
+            protected_targets.add(resolved_source)
+            if source_path.is_dir():
+                protected_directories.append(resolved_source)
+
+    if output_json is not None and output_video == output_json:
+        parser.error("--output-video and --output-json must be different paths.")
+
+    for output_path in (output_video, output_json):
+        if output_path is None:
+            continue
+        if output_path == data_root / "trajectory.json":
+            parser.error("Output paths must not overwrite the source trajectory.json.")
+        if output_path.is_relative_to(data_root):
+            parser.error("Output paths must be outside the source dataset directory.")
+        if output_path in protected_targets or any(
+            output_path.is_relative_to(source_dir)
+            for source_dir in protected_directories
+        ):
+            parser.error("Output paths must not overwrite resolved dataset sources.")
+
+
+def get_start_index(mode):
+    """Return the first usable frame while preserving trajectory history semantics."""
+
+    return 0 if mode == "vqa" else cfg.NUM_FRAMES - 1
 
 
 def load_model_input(data_root, trajectory, frame_ids, frame_index):
@@ -171,7 +218,7 @@ def run_trajectory_frame(
     model_input,
     navigation_text=None,
     navigation_weight=1.0,
-    temperature=0.0,
+    temperature=0.6,
 ):
     """Run Alpamayo once and return trajectory samples, CoT text, and latency."""
 
@@ -250,12 +297,13 @@ def main(argv=None):
     print(f"CUDA linalg library: {args.cuda_linalg_library}")
 
     trajectory, frame_ids = load_trajectory_index(args.data_root)
-    frames_to_process = len(frame_ids)
+    start_index = get_start_index(args.mode)
+    frames_to_process = max(0, len(frame_ids) - start_index)
     print(f"\nTotal recorded frames: {len(frame_ids)}")
     print(f"Frames selected for inference: {frames_to_process}")
 
     if frames_to_process == 0:
-        print("No recorded frames found.")
+        print("Not enough recorded frames for the selected mode.")
         return
 
     print("\nLoading model...")
@@ -266,7 +314,6 @@ def main(argv=None):
     cot_texts = []
     answer_texts = []
     inference_times = []
-    camera_images = []
     vqa_document = None
     if args.mode == "vqa":
         from module.open_loop_results import create_vqa_document
@@ -277,8 +324,9 @@ def main(argv=None):
             args.temperature,
         )
 
-    for frame_index in range(len(frame_ids)):
-        display_index = frame_index + 1
+    for display_index, frame_index in enumerate(
+        range(start_index, len(frame_ids)), start=1
+    ):
         frame_id = frame_ids[frame_index]
         print(f"  Frame {display_index}/{frames_to_process} (CARLA frame={frame_id})")
 
@@ -317,7 +365,6 @@ def main(argv=None):
             print(f"    Inference: {inference_time:.2f}s | CoC: {cot_text[:80]}...")
 
         inference_times.append(inference_time)
-        camera_images.append(load_front_camera_image(args.data_root, frame_id))
 
     avg_time = float(np.mean(inference_times)) if inference_times else 0.0
     print("\n" + "=" * 60)
@@ -333,12 +380,16 @@ def main(argv=None):
 
         print("\nCreating VQA video...")
         save_open_loop_vqa_video(
-            camera_images,
+            (
+                load_front_camera_image(args.data_root, frame_id)
+                for frame_id in frame_ids[start_index:]
+            ),
             answer_texts,
             inference_times,
             args.vqa_question,
             args.output_video,
             fps=5,
+            total_frames=frames_to_process,
         )
     elif predictions:
         from module.visualization import save_open_loop_video
@@ -346,13 +397,17 @@ def main(argv=None):
         print("\nCreating video...")
         save_open_loop_video(
             predictions,
-            camera_images,
+            (
+                load_front_camera_image(args.data_root, frame_id)
+                for frame_id in frame_ids[start_index:]
+            ),
             cot_texts,
             inference_times,
             args.output_video,
             fps=5,
             navigation_text=args.navigation_text if args.mode == "navigation" else "",
             navigation_weight=args.navigation_weight,
+            total_frames=frames_to_process,
         )
 
     print("\n" + "=" * 60)

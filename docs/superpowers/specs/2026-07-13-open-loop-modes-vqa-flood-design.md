@@ -21,9 +21,9 @@ fixed questions.
   non-negative.
 - `--vqa-question TEXT`, required in VQA mode and applied to every processed
   frame.
-- `--temperature FLOAT`, default `0.0`, applied to the selected open-loop
-  generation path. Zero uses deterministic decoding; positive values retain
-  sampling behavior.
+- `--temperature FLOAT`, default `0.6` for trajectory modes and `0.0` for VQA.
+  Zero uses deterministic VQA decoding; trajectory generation requires a
+  positive value because Alpamayo produces multiple sampled rollouts.
 - `--output-json PATH`, optional in VQA mode. When omitted, it is derived from
   `--output-video` by replacing the suffix with `.json`.
 
