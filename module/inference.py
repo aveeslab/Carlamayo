@@ -1,6 +1,5 @@
-"""Alpamayo inference utilities."""
+"""Alpamayo 2 Super inference utilities."""
 
-import copy
 import math
 import re
 
@@ -9,29 +8,22 @@ import numpy as np
 
 from transformers import BitsAndBytesConfig
 
-from alpamayo1_5.models.alpamayo1_5 import Alpamayo1_5
-from alpamayo1_5 import helper
+from alpamayo2_super import helper
+from alpamayo2_super.chat_template.conversation import build_conversation
+from alpamayo2_super.input_profiles import (
+    CANONICAL_CAMERA_IDS,
+    CANONICAL_CAMERA_NAMES,
+    select_task_input,
+)
+from alpamayo2_super.models.alpamayo2_super import Alpamayo2Super
+from alpamayo2_super.text_tasks import generate_text, prepare_vqa_inputs
 
 from . import config as cfg
-from .alpamayo_compat import patch_legacy_hydra_targets
 from .vlm_generate_optimization import VlmGenerateTiming, optimized_vlm_generate
 
-patch_legacy_hydra_targets()
-
 SUPPORTED_CUDA_LINALG_LIBRARIES = {"default", "cusolver", "magma"}
-ALPAMAYO_MODEL_NAME = "nvidia/Alpamayo-1.5-10B"
+ALPAMAYO_MODEL_NAME = "nvidia/Alpamayo2-Super"
 SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+?\|>|</s>|<s>")
-VQA_ANSWER_TERMINATORS = (
-    "<|answer_end|>",
-    "<|im_end|>",
-    "<|endoftext|>",
-    "<|cot_start|>",
-    "<|cot_end|>",
-    "<|meta_action_start|>",
-    "<|meta_action_end|>",
-    "<|question_start|>",
-    "<|question_end|>",
-)
 
 
 def configure_cuda_linalg_library(library: str | None):
@@ -58,7 +50,7 @@ def configure_cuda_linalg_library(library: str | None):
 
 
 def load_model(use_quantization: bool, device_map="auto"):
-    """Load Alpamayo model and processor."""
+    """Load the Alpamayo 2 Super model and its checkpoint processor."""
     if use_quantization:
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -66,7 +58,7 @@ def load_model(use_quantization: bool, device_map="auto"):
             bnb_4bit_use_double_quant=True,
             bnb_4bit_quant_type="nf4",
         )
-        model = Alpamayo1_5.from_pretrained(
+        model = Alpamayo2Super.from_pretrained(
             ALPAMAYO_MODEL_NAME,
             quantization_config=quantization_config,
             device_map=device_map,
@@ -74,44 +66,100 @@ def load_model(use_quantization: bool, device_map="auto"):
         )
     else:
         if device_map:
-            model = Alpamayo1_5.from_pretrained(
+            model = Alpamayo2Super.from_pretrained(
                 ALPAMAYO_MODEL_NAME,
                 dtype=torch.bfloat16,
                 device_map=device_map,
             )
         else:
-            model = Alpamayo1_5.from_pretrained(
+            model = Alpamayo2Super.from_pretrained(
                 ALPAMAYO_MODEL_NAME,
                 dtype=torch.bfloat16,
             ).to("cuda")
 
-    processor = helper.get_processor(model.tokenizer)
+    processor = helper.get_processor(model.tokenizer, model.config)
     return model, processor
 
 
-def _prime_oom_pipeline(model):
-    """Reset the OOM-free demand-layering pipeline before an inference, if any.
+def prepare_model_input(images_array, history_xyz, history_rot, t0_us):
+    """Convert CARLA data to the Alpamayo 2 Super seven-camera source format.
 
-    When the model was loaded with ``module.oom_offload.load_offloaded_model``
-    (``--oom-free``), a ``TriHookPipeline`` is attached as ``model._oom_pipeline``
-    and must be primed once per inference. A normally-loaded model has no such
-    attribute and this is a no-op.
+    ``images_array`` holds the canonical PhysicalAI camera ring in index order
+    (``camera, frame, height, width, channel``). ``t0_us`` is the simulation
+    timestamp of the most recent frame; earlier frames are spaced one control
+    step apart, matching CARLA's fixed synchronous tick.
     """
-    pipeline = getattr(model, "_oom_pipeline", None)
-    if pipeline is not None:
-        pipeline.start_iteration()
-
-
-def prepare_model_input(images_array, history_xyz, history_rot):
-    """Convert CARLA data to model input format."""
     images = torch.from_numpy(images_array).permute(0, 1, 4, 2, 3).contiguous()
+    num_cameras, num_frames = images.shape[0], images.shape[1]
+    if num_cameras != len(CANONICAL_CAMERA_IDS):
+        raise ValueError(
+            f"Expected {len(CANONICAL_CAMERA_IDS)} source cameras, got {num_cameras}"
+        )
     hist_xyz = torch.from_numpy(history_xyz).float().unsqueeze(0).unsqueeze(0)
     hist_rot = torch.from_numpy(history_rot).float().unsqueeze(0).unsqueeze(0)
+
+    frame_step_us = int(round(cfg.CONTROL_DT * 1_000_000))
+    frame_offsets = torch.arange(-(num_frames - 1), 1, dtype=torch.int64) * frame_step_us
+    absolute_timestamps = (int(t0_us) + frame_offsets).unsqueeze(0).repeat(num_cameras, 1)
+    camera_tmin = int(absolute_timestamps.min().item())
+
     return {
         "image_frames": images,
+        "camera_indices": torch.tensor(CANONICAL_CAMERA_IDS, dtype=torch.int64),
+        "camera_names": list(CANONICAL_CAMERA_NAMES),
         "ego_history_xyz": hist_xyz,
         "ego_history_rot": hist_rot,
+        "absolute_timestamps": absolute_timestamps,
+        "relative_timestamps": (absolute_timestamps - camera_tmin).float() * 1e-6,
+        "camera_tmin": camera_tmin,
+        "ego_t0": torch.tensor([int(t0_us)], dtype=torch.int64),
+        "ego_t0_frame_idx": torch.tensor([num_frames - 1], dtype=torch.int64),
     }
+
+
+def _tokenize_trajectory_prompt(processor, model_config, task_data, nav_text=None):
+    """Tokenize one trajectory-task prompt, optionally nav-conditioned."""
+    data_for_prompt = dict(task_data)
+    components_order = ["image", "traj_history", "prompt"]
+    if nav_text:
+        data_for_prompt["nav_text"] = [nav_text]
+        components_order = ["image", "traj_history", "nav_instruction", "prompt"]
+
+    messages = build_conversation(
+        data=data_for_prompt,
+        num_tokens_per_history_traj=model_config.tokens_per_history_traj,
+        num_tokens_per_future_traj=model_config.tokens_per_future_traj,
+        components_order=components_order,
+        components_prompt=["cot", "traj_future"],
+        generation_mode=True,
+        include_camera_ids=model_config.include_camera_ids,
+        camera_ids=data_for_prompt["camera_indices"],
+        include_frame_nums=model_config.frame_label == "frame_num",
+    )
+    if messages[-1]["role"] == "assistant" and not messages[-1]["content"]:
+        messages = messages[:-1]
+
+    text = processor.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+        add_vision_id=False,
+    )
+    images = data_for_prompt["image_frames"].flatten(0, 1)
+    images = (images.float() / 255.0) if images.dtype == torch.uint8 else images.float()
+    tokenized_data = dict(
+        processor(
+            text=text,
+            images=images,
+            videos=None,
+            padding=False,
+            return_tensors="pt",
+            do_rescale=False,
+        )
+    )
+    if tokenized_data["input_ids"].shape[0] != 1:
+        raise ValueError("trajectory prompt tokenization expects one sample at a time")
+    return tokenized_data
 
 
 def run_inference(
@@ -121,78 +169,55 @@ def run_inference(
     navigation_text: str | None = None,
     navigation_weight: float = 1.0,
     vlm_generate_timing: VlmGenerateTiming | None = None,
-    disable_unused_generate_logits: bool = True,
-    vlm_image_pixels: int | None = None,
 ):
-    """Run Alpamayo inference locally.
+    """Run Alpamayo 2 Super trajectory inference locally.
 
-    ``navigation_text`` conditions the trajectory prompt. ``navigation_weight``
-    uses Alpamayo's CFG navigation path when it differs from 1.0.
+    ``navigation_text`` conditions the trajectory prompt through the model's
+    ``nav_instruction`` component. The released single-GPU Alpamayo 2 Super
+    inference path has no classifier-free-guidance sampler, so any
+    ``navigation_weight`` other than 1.0 falls back to plain nav conditioning.
     """
 
     nav_text = navigation_text.strip() if isinstance(navigation_text, str) else ""
     if not math.isfinite(float(navigation_weight)) or float(navigation_weight) < 0:
         raise ValueError("navigation_weight must be a non-negative finite number")
+    if nav_text and not math.isclose(float(navigation_weight), 1.0):
+        print(
+            "Navigation CFG is not available in the single-GPU Alpamayo 2 Super "
+            f"release path; using plain nav conditioning instead of weight "
+            f"{float(navigation_weight):.2f}."
+        )
 
-    messages = helper.create_message(
-        data["image_frames"].flatten(0, 1),
-        camera_indices=data.get("camera_indices"),
+    task_data = select_task_input(data, "trajectory")
+    tokenized_data = _tokenize_trajectory_prompt(
+        processor,
+        model.config,
+        task_data,
         nav_text=nav_text or None,
     )
 
-    processor_kwargs = {}
-    if vlm_image_pixels is not None and int(vlm_image_pixels) > 0:
-        processor_kwargs = {
-            "min_pixels": int(vlm_image_pixels),
-            "max_pixels": int(vlm_image_pixels),
-        }
-
-    inputs = processor.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=False,
-        continue_final_message=True,
-        return_dict=True,
-        return_tensors="pt",
-        **processor_kwargs,
-    )
-
     model_inputs = {
-        "tokenized_data": inputs,
-        "ego_history_xyz": data["ego_history_xyz"],
-        "ego_history_rot": data["ego_history_rot"],
+        "tokenized_data": tokenized_data,
+        "ego_history_xyz": task_data["ego_history_xyz"],
+        "ego_history_rot": task_data["ego_history_rot"],
     }
     model_inputs = helper.to_device(model_inputs, "cuda")
 
-    diffusion_kwargs = {"inference_step": 10}
-    inference_fn = model.sample_trajectories_from_data_with_vlm_rollout
-    use_cfg_nav = False
-    if nav_text and not math.isclose(float(navigation_weight), 1.0):
-        use_cfg_nav = True
-        inference_fn = model.sample_trajectories_from_data_with_vlm_rollout_cfg_nav
-        diffusion_kwargs = {
-            **diffusion_kwargs,
-            "use_classifier_free_guidance": True,
-            "inference_guidance_weight": float(navigation_weight),
-        }
-
-    disable_generate_logits = disable_unused_generate_logits and not use_cfg_nav
-    _prime_oom_pipeline(model)
     with (
         optimized_vlm_generate(
             model,
-            disable_output_logits=disable_generate_logits,
+            disable_output_logits=True,
             timing=vlm_generate_timing,
         ),
         torch.inference_mode(),
         torch.autocast("cuda", dtype=torch.bfloat16),
     ):
-        pred_xyz, pred_rot, extra = inference_fn(
+        pred_xyz, _pred_rot, _logprob, extra = model.sample_trajectories_from_data(
             data=model_inputs,
             top_p=0.98,
             temperature=0.6,
             num_traj_samples=cfg.NUM_TRAJ_SAMPLES,
-            diffusion_kwargs=diffusion_kwargs,
+            diffusion_kwargs={"inference_step": 10},
             max_generation_length=256,
             return_extra=True,
         )
@@ -236,90 +261,15 @@ def _clean_generated_answer_text(text):
     return " ".join(text.split()).strip()
 
 
-def _extract_answer_from_decoded_text(decoded_text):
-    text = str(decoded_text).strip()
-    if not text:
-        return ""
-
-    if "<|answer_end|>" in text:
-        candidate = text.partition("<|answer_end|>")[0]
-        if "<|answer_start|>" in candidate:
-            candidate = candidate.rsplit("<|answer_start|>", 1)[1]
-        return _clean_generated_answer_text(candidate)
-
-    if "<|answer_start|>" in text:
-        candidate = text.rsplit("<|answer_start|>", 1)[1]
-    else:
-        candidate = text
-
-    for terminator in VQA_ANSWER_TERMINATORS:
-        if terminator == "<|answer_end|>":
-            continue
-        candidate = candidate.split(terminator, 1)[0]
-
-    return _clean_generated_answer_text(candidate)
-
-
-def _generate_vqa_text_with_partial_answer_fallback(
-    model,
-    model_inputs,
-    top_p=0.98,
-    top_k=None,
-    temperature=0.6,
-    num_samples=1,
-    max_generation_length=256,
-):
-    """Generate VQA text while preserving partial answers without ``answer_end``."""
-
-    tokenized_data = dict(model_inputs["tokenized_data"])
-    input_ids = tokenized_data.pop("input_ids")
-
-    generation_config = copy.deepcopy(model.vlm.generation_config)
-    generation_config.top_p = top_p
-    generation_config.temperature = temperature
-    generation_config.do_sample = True
-    generation_config.num_return_sequences = num_samples
-    generation_config.max_new_tokens = max_generation_length
-    generation_config.output_logits = False
-    generation_config.return_dict_in_generate = True
-    generation_config.top_k = top_k
-    generation_config.pad_token_id = model.tokenizer.pad_token_id
-
-    generated = model.vlm.generate(
-        input_ids=input_ids,
-        **tokenized_data,
-        generation_config=generation_config,
-    )
-    sequences = generated["sequences"] if isinstance(generated, dict) else generated.sequences
-    generated_tokens = sequences[:, input_ids.shape[1] :]
-    decoded_batch = model.tokenizer.batch_decode(generated_tokens, skip_special_tokens=False)
-
-    batch_size = int(input_ids.shape[0])
-    raw = np.array(decoded_batch, dtype=object).reshape([batch_size, num_samples])
-    answers = np.array(
-        [_extract_answer_from_decoded_text(text) for text in decoded_batch],
-        dtype=object,
-    ).reshape([batch_size, num_samples])
-    return {
-        "answer": answers,
-        "raw_answer": raw,
-    }
-
-
 def extract_cot_text(extra):
     return _extract_text_field(extra, "cot")
 
 
 def extract_answer_text(extra):
-    answer = _extract_text_field(extra, "answer")
-    if answer:
-        return _extract_answer_from_decoded_text(answer)
-
-    for key in ("raw_answer", "raw_text", "decoded_answer", "decoded_text"):
-        raw_answer = _extract_text_field(extra, key)
-        if raw_answer:
-            return _extract_answer_from_decoded_text(raw_answer)
-
+    for key in ("answer", "cot", "raw_outputs"):
+        answer = _extract_text_field(extra, key)
+        if answer:
+            return _clean_generated_answer_text(answer)
     return ""
 
 
@@ -329,44 +279,29 @@ def run_vqa(
     data,
     question: str,
 ):
-    """Run Alpamayo VQA text generation for a driving-relevant question."""
+    """Run Alpamayo 2 Super no-special VQA text generation."""
 
     question = question.strip()
     if not question:
         raise ValueError("question must not be empty")
 
-    messages = helper.create_vqa_message(
-        data["image_frames"].flatten(0, 1),
+    vqa_data = select_task_input(data, "vqa")
+    model_inputs = prepare_vqa_inputs(
+        vqa_data,
+        model.config,
+        model.tokenizer,
         question=question,
-        camera_indices=data.get("camera_indices"),
     )
-    inputs = processor.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=False,
-        continue_final_message=True,
-        return_dict=True,
-        return_tensors="pt",
-    )
-    model_inputs = helper.to_device({"tokenized_data": inputs}, "cuda")
+    model_inputs = helper.to_device(model_inputs, "cuda")
 
-    _prime_oom_pipeline(model)
     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-        if hasattr(model, "vlm") and hasattr(model, "tokenizer"):
-            return _generate_vqa_text_with_partial_answer_fallback(
-                model,
-                model_inputs,
-                top_p=0.98,
-                temperature=0.6,
-                num_samples=1,
-                max_generation_length=256,
-            )
-        return model.generate_text(
-            data=model_inputs,
+        return generate_text(
+            model,
+            model_inputs,
             top_p=0.98,
             temperature=0.6,
             num_samples=1,
-            max_generation_length=256,
+            max_new_tokens=256,
         )
 
 

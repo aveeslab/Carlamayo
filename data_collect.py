@@ -27,16 +27,19 @@ WARMUP_SECONDS = 2.0  # Drive briefly before recording sensor data.
 NUM_NPC_VEHICLES = 20
 NUM_NPC_WALKERS = 30
 
-# Sensor poses in the ego vehicle frame.
+# Sensor poses in the ego vehicle frame: the Alpamayo 2 Super seven-camera ring.
+def _cam(x, y, yaw, fov):
+    return {"x": x, "y": y, "z": 2.4, "pitch": 0.0, "yaw": yaw, "fov": fov}
+
+
 SENSOR_CONFIGS = {
-    "cam_front_wide": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 120},
-    "cam_front_tele": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 30},
-    "cam_front_left": {"x": 1.0, "y": -0.5, "z": 2.4, "pitch": 0.0, "yaw": -60.0, "fov": 120},
-    "cam_front_right": {"x": 1.0, "y": 0.5, "z": 2.4, "pitch": 0.0, "yaw": 60.0, "fov": 120},
-    "cam_rear_left": {"x": -0.5, "y": -0.5, "z": 2.4, "pitch": 0.0, "yaw": -120.0, "fov": 120},
-    "cam_rear_right": {"x": -0.5, "y": 0.5, "z": 2.4, "pitch": 0.0, "yaw": 120.0, "fov": 120},
-    "cam_rear_wide": {"x": -1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 180.0, "fov": 120},
-    "cam_rear_tele": {"x": -1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 180.0, "fov": 30},
+    "camera_cross_left_120fov": _cam(1.0, -0.5, -60.0, 120),
+    "camera_front_wide_120fov": _cam(1.5, 0.0, 0.0, 120),
+    "camera_cross_right_120fov": _cam(1.0, 0.5, 60.0, 120),
+    "camera_rear_left_70fov": _cam(-0.5, -0.5, -150.0, 70),
+    "camera_rear_tele_30fov": _cam(-1.5, 0.0, 180.0, 30),
+    "camera_rear_right_70fov": _cam(-0.5, 0.5, 150.0, 70),
+    "camera_front_tele_30fov": _cam(1.5, 0.0, 0.0, 30),
 }
 
 

@@ -40,13 +40,20 @@ class CARLAInterface:
         self.npc_walker_controller_ids = []
         self.tm_port = 8000
 
+        # The Alpamayo 2 Super seven-camera source ring in canonical index order.
+        def cam(x, y, yaw, fov):
+            return {"x": x, "y": y, "z": 2.4, "pitch": 0.0, "yaw": yaw, "fov": fov}
+
         self.camera_configs = {
-            "cam_front_left": {"x": 1.0, "y": -0.5, "z": 2.4, "pitch": 0.0, "yaw": -60.0, "fov": 120},
-            "cam_front_wide": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 95},
-            "cam_front_right": {"x": 1.0, "y": 0.5, "z": 2.4, "pitch": 0.0, "yaw": 60.0, "fov": 120},
-            "cam_front_tele": {"x": 1.5, "y": 0.0, "z": 2.4, "pitch": 0.0, "yaw": 0.0, "fov": 30},
+            "camera_cross_left_120fov": cam(1.0, -0.5, -60.0, 120),
+            "camera_front_wide_120fov": cam(1.5, 0.0, 0.0, 120),
+            "camera_cross_right_120fov": cam(1.0, 0.5, 60.0, 120),
+            "camera_rear_left_70fov": cam(-0.5, -0.5, -150.0, 70),
+            "camera_rear_tele_30fov": cam(-1.5, 0.0, 180.0, 30),
+            "camera_rear_right_70fov": cam(-0.5, 0.5, 150.0, 70),
+            "camera_front_tele_30fov": cam(1.5, 0.0, 0.0, 30),
         }
-        self.camera_order = ["cam_front_left", "cam_front_wide", "cam_front_right", "cam_front_tele"]
+        self.camera_order = list(self.camera_configs)
 
     def connect(self, host="localhost", port=2000):
         print(f"Connecting to CARLA at {host}:{port}...")

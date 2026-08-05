@@ -9,13 +9,17 @@ from scipy.spatial.transform import Rotation as R
 
 from . import config as cfg
 
+# Canonical Alpamayo 2 Super source-ring camera folders in index order.
 OPEN_LOOP_CAMERA_ORDER = (
-    "cam_front_left",
-    "cam_front_wide",
-    "cam_front_right",
-    "cam_front_tele",
+    "camera_cross_left_120fov",
+    "camera_front_wide_120fov",
+    "camera_cross_right_120fov",
+    "camera_rear_left_70fov",
+    "camera_rear_tele_30fov",
+    "camera_rear_right_70fov",
+    "camera_front_tele_30fov",
 )
-FRONT_CAMERA_NAME = "cam_front_wide"
+FRONT_CAMERA_NAME = "camera_front_wide_120fov"
 
 
 def load_trajectory_index(data_root):
@@ -121,4 +125,7 @@ def load_open_loop_arrays(
         "image_frames": image_frames,
         "history_xyz": history_xyz,
         "history_rot": history_rot,
+        # Recording runs at the fixed control tick, so the frame index gives the
+        # clip-relative timestamp of the newest camera frame.
+        "t0_us": int(t0_index * cfg.CONTROL_DT * 1_000_000),
     }

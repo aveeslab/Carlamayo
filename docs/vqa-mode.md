@@ -8,7 +8,7 @@ Start CARLA before launching the integration script:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -24,11 +24,15 @@ export CARLA_ROOT=~/carla
 From the repository root:
 
 ```bash
-source a1_5_carla_venv/bin/activate
+source a2_carla_venv/bin/activate
 python carlamayo_closed_loop.py --mode vqa --pygame-ui
 ```
 
-Closed-loop loading defaults to full precision. On lower-VRAM machines, add `--quantization`:
+VQA uses Alpamayo 2 Super's six-camera VQA input profile (the four front/cross
+cameras plus rear left/right and rear telephoto) selected from the seven-camera
+source ring, with the no-special-token prompt format from the release notebooks.
+
+Closed-loop loading defaults to full precision. On lower-VRAM machines, add `--quantization` (experimental for the 34B checkpoint):
 
 ```bash
 python carlamayo_closed_loop.py --mode vqa --pygame-ui --quantization
@@ -71,7 +75,7 @@ The answer is shown in the pygame panel and printed to the terminal.
 # Non-blocking inference worker.
 python carlamayo_closed_loop.py --mode vqa --pygame-ui --async
 
-# Lower VRAM model loading.
+# Lower VRAM model loading (experimental).
 python carlamayo_closed_loop.py --mode vqa --pygame-ui --quantization
 
 ```

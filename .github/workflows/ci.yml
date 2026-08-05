@@ -32,7 +32,7 @@ jobs:
             transformers==4.57.1 \
             einops \
             hydra-core
-          python -m pip install --no-deps -e third_party/alpamayo1.5
+          python -m pip install --no-deps -e third_party/alpamayo2
 
       - name: Run lightweight tests
         env:

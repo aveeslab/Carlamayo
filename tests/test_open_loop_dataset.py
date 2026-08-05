@@ -70,10 +70,12 @@ def test_load_open_loop_arrays_preserves_camera_and_frame_order(tmp_path):
         num_frames=2,
     )
 
-    assert camera_history.shape == (4, 2, 2, 3, 3)
+    assert camera_history.shape == (7, 2, 2, 3, 3)
     assert camera_history[0, 0, 0, 0, 0] == 1
     assert camera_history[0, 1, 0, 0, 0] == 2
     assert camera_history[3, 1, 0, 0, 0] == 32
-    assert sample["image_frames"].shape == (4, 2, 2, 3, 3)
+    assert camera_history[6, 1, 0, 0, 0] == 62
+    assert sample["image_frames"].shape == (7, 2, 2, 3, 3)
     assert sample["history_xyz"].shape == (2, 3)
     assert sample["history_rot"].shape == (2, 3, 3)
+    assert sample["t0_us"] == 100_000

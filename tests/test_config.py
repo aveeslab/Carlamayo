@@ -4,7 +4,7 @@ from module import config as cfg
 
 
 def test_runtime_dimensions_match_alpamayo_camera_history_contract():
-    assert cfg.NUM_CAMERAS == 4
+    assert cfg.NUM_CAMERAS == 7
     assert cfg.NUM_FRAMES == 4
     assert cfg.NUM_HISTORY == 16
     assert cfg.IMG_CHANNELS == 3

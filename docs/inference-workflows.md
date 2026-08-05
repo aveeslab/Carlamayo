@@ -8,7 +8,7 @@ Start CARLA first:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -23,31 +23,24 @@ python data_collect.py
 Outputs:
 
 - `carla_data/trajectory.json`
-- `carla_data/cam_*/<frame>.jpg`
+- `carla_data/camera_*/<frame>.jpg`
 - `carla_data/lidar_top/<frame>.ply`
 
-`data_collect.py` records only complete synchronous frames. Sensor messages are matched to the exact frame returned by `world.tick()` so camera/LiDAR files and trajectory poses remain aligned under slower Epic rendering or after map reloads.
+`data_collect.py` records the full Alpamayo 2 Super seven-camera source ring and only complete synchronous frames. Sensor messages are matched to the exact frame returned by `world.tick()` so camera/LiDAR files and trajectory poses remain aligned under slower Epic rendering or after map reloads.
 
 ## 2. Open-Loop Inference
 
 Run open-loop inference on collected CARLA data:
 
 ```bash
-source a1_5_venv/bin/activate
+source a2_venv/bin/activate
 python carlamayo_open_loop.py
 ```
 
-Optional 4-bit quantized mode:
+Optional 4-bit quantized mode (experimental for the 34B checkpoint):
 
 ```bash
 python carlamayo_open_loop.py --quantization
-```
-
-Optional OOM-free mode (full-precision CPU↔GPU demand layering; see
-[OOM-Free Mode](oom-free-mode.md)):
-
-```bash
-python carlamayo_open_loop.py --oom-free
 ```
 
 Output:
@@ -60,7 +53,7 @@ Before running, make sure CARLA is running:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -83,9 +76,14 @@ closed-loop script does not expose a separate map CLI option.
 Run closed-loop inference from the repository root:
 
 ```bash
-source a1_5_carla_venv/bin/activate
+source a2_carla_venv/bin/activate
 python carlamayo_closed_loop.py
 ```
+
+> Full-precision Alpamayo 2 Super needs roughly 70 GB of VRAM for the model
+> alone. When one GPU is not enough for both the model and CARLA, run the CARLA
+> server on a second GPU (`./CarlaUE4.sh -RenderOffScreen -graphicsadapter=1`)
+> or pass an explicit `--device-map`.
 
 Optional pygame UI modes:
 
@@ -102,20 +100,10 @@ Mode-specific usage guides:
 - [Navigation Mode](navigation-mode.md)
 - [VQA Mode](vqa-mode.md)
 
-Optional 4-bit quantized mode:
+Optional 4-bit quantized mode (experimental for the 34B checkpoint):
 
 ```bash
 python carlamayo_closed_loop.py --quantization
-```
-
-Optional OOM-free mode — keep CARLA running and offload only Alpamayo via
-full-precision CPU↔GPU demand layering (see [OOM-Free Mode](oom-free-mode.md)).
-On a 16 GB GPU this fits where `--quantization` still OOMs against a live CARLA:
-
-```bash
-python carlamayo_closed_loop.py --mode normal --oom-free
-# off-tick inference is recommended for the slower offloaded model:
-python carlamayo_closed_loop.py --mode normal --oom-free --async
 ```
 
 Optional async inference mode:
@@ -130,11 +118,14 @@ Output:
 
 ## 4. NVIDIA Original Test Script
 
-The original Alpamayo test script is provided by the submodule. It downloads example data and model weights. The model weights are large and may take time depending on network speed.
+The original Alpamayo 2 Super smoke script is provided by the submodule. It downloads example data and model weights. The model weights are large (~72 GB) and may take time depending on network speed.
 
 ```bash
-source a1_5_venv/bin/activate
-python third_party/alpamayo1.5/src/alpamayo1_5/test_inference.py
+source a2_venv/bin/activate
+python -m alpamayo2_super.inference_smoke --help
 ```
 
-To generate more trajectories and reasoning traces, increase `num_traj_samples` in that submodule script. Review the model card/license terms before downloading or using the model weights.
+Running the smoke end to end also requires access to the gated
+[`nvidia/PhysicalAI-Autonomous-Vehicles`](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
+dataset; see `third_party/alpamayo2/README.md` for full usage. Review the model
+card/license terms before downloading or using the model weights.

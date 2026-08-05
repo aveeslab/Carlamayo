@@ -8,7 +8,7 @@ Start CARLA before launching the integration script:
 
 ```bash
 cd ~/carla
-./CarlaUE4.sh -RenderOffScreen
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
@@ -24,11 +24,11 @@ export CARLA_ROOT=~/carla
 From the repository root:
 
 ```bash
-source a1_5_carla_venv/bin/activate
+source a2_carla_venv/bin/activate
 python carlamayo_closed_loop.py --mode navigation --pygame-ui
 ```
 
-Closed-loop loading defaults to full precision. On lower-VRAM machines, add `--quantization`:
+Closed-loop loading defaults to full precision. On lower-VRAM machines, add `--quantization` (experimental for the 34B checkpoint):
 
 ```bash
 python carlamayo_closed_loop.py --mode navigation --pygame-ui --quantization
@@ -50,7 +50,7 @@ Then press `Enter`.
 - Text before `|` becomes the navigation instruction.
 - The number after `|` becomes the navigation guidance weight.
 - Weight `1.0` uses normal navigation conditioning.
-- Weights other than `1.0` use Alpamayo classifier-free guidance navigation and may require more VRAM.
+- The released single-GPU Alpamayo 2 Super inference path has no classifier-free-guidance sampler, so weights other than `1.0` fall back to normal nav conditioning with a console notice. (Alpamayo 2's CFG navigation exists only as the two-GPU demo in `third_party/alpamayo2/examples/two_gpu_nav_cfg_demo.py`.)
 
 Examples:
 
@@ -73,11 +73,8 @@ Prepare to stop at the traffic light | 1.0
 # Non-blocking inference worker.
 python carlamayo_closed_loop.py --mode navigation --pygame-ui --async
 
-# Lower VRAM model loading.
+# Lower VRAM model loading (experimental).
 python carlamayo_closed_loop.py --mode navigation --pygame-ui --quantization
-
-# Exact returned-logits baseline for debugging memory changes.
-python carlamayo_closed_loop.py --mode navigation --pygame-ui --keep-generate-logits
 
 ```
 

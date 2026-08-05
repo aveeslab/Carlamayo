@@ -7,7 +7,9 @@ import os
 CARLA_AGENT_ROOT = os.path.expanduser("~/carla")
 
 # Alpamayo Configuration
-NUM_CAMERAS = 4
+# Alpamayo 2 Super consumes the seven-camera PhysicalAI source ring; each task
+# then selects its fixed six-camera profile from that ring.
+NUM_CAMERAS = 7
 IMG_HEIGHT = 1080
 IMG_WIDTH = 1920
 IMG_CHANNELS = 3
@@ -45,9 +47,6 @@ CONTROL_SMOOTH_ALPHA = 0.25
 
 # Auto-respawn after collision.
 RESPAWN_COLLISION_COOLDOWN_FRAMES = 10
-
-# Keep Alpamayo's original Qwen-VL image-token budget fixed from config.
-VLM_IMAGE_PIXELS = 196608
 
 # Official PID follower config
 PID_LOOKAHEAD_MIN_M = 4.0

@@ -82,38 +82,6 @@ def parse_args():
         help="Use 4-bit quantized model instead of the default full-precision model.",
     )
     parser.add_argument(
-        "--oom-free",
-        dest="oom_free",
-        action="store_true",
-        default=False,
-        help=(
-            "Use OOM-free CPU<->GPU demand layering (third_party/oom-free-alpamayo) "
-            "instead of loading the whole model on the GPU. Streams full-precision "
-            "VLM/ViT/Expert layers on demand so Alpamayo fits alongside a running "
-            "CARLA server. The model is loaded after CARLA is fully spawned so the "
-            "residency plan reflects the VRAM CARLA actually uses. Mutually "
-            "exclusive with --quantization."
-        ),
-    )
-    parser.add_argument(
-        "--oom-free-headroom-gb",
-        type=float,
-        default=None,
-        help="OOM-free: VRAM (GB) reserved for activation spikes. Default ~3.5.",
-    )
-    parser.add_argument(
-        "--oom-free-margin",
-        type=int,
-        default=None,
-        help="OOM-free: safety margin subtracted from the max resident VLM layer count.",
-    )
-    parser.add_argument(
-        "--oom-free-resident",
-        type=int,
-        default=None,
-        help="OOM-free: force this many GPU-resident VLM layers (default: auto from free VRAM).",
-    )
-    parser.add_argument(
         "--async",
         dest="async_mode",
         action="store_true",
@@ -147,17 +115,6 @@ def parse_args():
         help='Initial VQA question for --mode vqa, e.g. "Describe the scene.".',
     )
     parser.add_argument(
-        "--keep-generate-logits",
-        dest="disable_unused_generate_logits",
-        action="store_false",
-        default=True,
-        help=(
-            "Keep Alpamayo VLM returned logits during trajectory generation. "
-            "Default disables these unused returned logits to reduce CUDA memory "
-            "without changing image tokens or sampling."
-        ),
-    )
-    parser.add_argument(
         "--device-map",
         default="auto",
         help='Model device_map passed to from_pretrained. Default: "auto".',
@@ -177,8 +134,6 @@ def parse_args():
         help="Print async inference worker tracebacks when worker requests fail.",
     )
     args = parser.parse_args()
-    if args.oom_free and args.quantization:
-        parser.error("--oom-free and --quantization are mutually exclusive.")
     args.start_paused = bool(args.pygame_ui)
     args.pygame_ui_video = (
         derive_pygame_ui_video_path(cfg.OUTPUT_VIDEO) if args.pygame_ui else None
@@ -191,12 +146,9 @@ def main():
     inference_interval_sec = 1.0
 
     print("=" * 60)
-    print("CARLA Real-time Control with Alpamayo")
+    print("CARLA Real-time Control with Alpamayo 2 Super")
     print("=" * 60)
-    if args.oom_free:
-        print("Model loading: OOM-free CPU<->GPU demand layering (full-precision)")
-    else:
-        print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
+    print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
     print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
     print(f"Inference mode: {args.mode}")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
@@ -222,16 +174,9 @@ def main():
 
     print("\nLoading model...")
     configure_cuda_linalg_library(args.cuda_linalg_library)
-    model = None
-    processor = None
-    if not args.oom_free:
-        model, processor = load_model(args.quantization, device_map=args.device_map)
-        print("Model loaded!")
-        print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
-    else:
-        # Defer loading until CARLA has spawned its cameras/NPCs so the OOM-free
-        # residency plan is computed against the VRAM CARLA actually leaves free.
-        print("OOM-free mode: Alpamayo loads after CARLA is fully spawned.")
+    model, processor = load_model(args.quantization, device_map=args.device_map)
+    print("Model loaded!")
+    print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
     carla_if = CARLAInterface()
     video_recorder = VideoRecorder(cfg.OUTPUT_VIDEO, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
@@ -266,21 +211,6 @@ def main():
         carla_if.setup_cameras()
         carla_if.setup_collision_sensor()
         time.sleep(1.0)
-
-        if args.oom_free:
-            from module.oom_offload import load_offloaded_model
-
-            print("Loading model (OOM-free CPU<->GPU demand layering)...")
-            oom_kwargs = {}
-            if args.oom_free_headroom_gb is not None:
-                oom_kwargs["headroom_gb"] = args.oom_free_headroom_gb
-            if args.oom_free_margin is not None:
-                oom_kwargs["margin"] = args.oom_free_margin
-            if args.oom_free_resident is not None:
-                oom_kwargs["resident_override"] = args.oom_free_resident
-            model, processor = load_offloaded_model(**oom_kwargs)
-            print("Model loaded!")
-            print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
         pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
 
@@ -345,31 +275,18 @@ def main():
             _clear_async_queues()
 
         def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
-            def _run_once(weight):
+            def _run_once():
                 return run_inference(
                     model,
                     processor,
                     model_data,
                     navigation_text=navigation_text,
-                    navigation_weight=weight,
+                    navigation_weight=navigation_weight,
                     vlm_generate_timing=vlm_generate_timing,
-                    disable_unused_generate_logits=args.disable_unused_generate_logits,
-                    vlm_image_pixels=cfg.VLM_IMAGE_PIXELS,
                 )
 
             try:
-                return _run_once(navigation_weight)
-            except torch.cuda.OutOfMemoryError:
-                torch.cuda.empty_cache()
-                if navigation_text and abs(float(navigation_weight) - 1.0) > 1e-6:
-                    message = (
-                        "Navigation CFG ran out of CUDA memory; "
-                        "falling back to normal nav conditioning with weight 1.0."
-                    )
-                    print(message)
-                    nav_state.set_error(message)
-                    return _run_once(1.0)
-                raise
+                return _run_once()
             except RuntimeError as exc:
                 if "CUSOLVER_STATUS_INTERNAL_ERROR" not in str(exc):
                     raise
@@ -380,7 +297,7 @@ def main():
                 print(message)
                 nav_state.set_error(message)
                 configure_cuda_linalg_library("magma")
-                return _run_once(navigation_weight)
+                return _run_once()
 
         def _run_vqa_with_linalg_fallback(model_data, question):
             try:
@@ -422,6 +339,7 @@ def main():
                     "images_array": images_array,
                     "history_xyz": history_xyz,
                     "history_rot": history_rot,
+                    "t0_us": int(frame_count * cfg.CONTROL_DT * 1_000_000),
                     "navigation_text": nav_state.navigation_text,
                     "navigation_weight": nav_state.navigation_weight,
                     "vqa_question": nav_state.vqa_question,
@@ -444,6 +362,7 @@ def main():
                             req["images_array"],
                             req["history_xyz"],
                             req["history_rot"],
+                            req["t0_us"],
                         )
                         if req["mode"] == "vqa":
                             extra = _run_vqa_with_linalg_fallback(
@@ -546,7 +465,7 @@ def main():
                     pending_inference = False
                     last_seen_nav_revision = nav_state.revision
                 if nav_state.paused:
-                    carla_if._control(0.0, 0.0, 1.0)
+                    carla_if.apply_control(0.0, 0.0, 1.0)
                     latest_telemetry = {
                         **latest_telemetry,
                         "frame": frame_count,
@@ -717,7 +636,12 @@ def main():
 
                     history_xyz, history_rot = carla_if.get_history_in_local_frame()
 
-                    model_data = prepare_model_input(images_array, history_xyz, history_rot)
+                    model_data = prepare_model_input(
+                        images_array,
+                        history_xyz,
+                        history_rot,
+                        int(frame_count * cfg.CONTROL_DT * 1_000_000),
+                    )
                     if args.mode == "vqa":
                         should_run_vqa = (
                             bool(nav_state.vqa_question)

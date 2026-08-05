@@ -7,16 +7,17 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 | Requirement | Specification |
 |-------------|---------------|
 | **Python** | 3.12.x for Alpamayo, 3.10.x for CARLA |
-| **GPU** | NVIDIA GPU with ≥24 GB VRAM recommended for Alpamayo; 4-bit quantization can reduce memory usage |
+| **GPU** | NVIDIA GPU with ≥80 GB VRAM for full-precision Alpamayo 2 Super (34B, bf16); 4-bit quantization is experimental and can reduce memory usage |
 | **OS** | Linux tested |
 | **CARLA** | 0.9.16 |
+| **CUDA** | CUDA Toolkit 12.x with `nvcc`; `flash-attn` builds during installation |
 | **ffmpeg** | Recommended for VS Code/browser-compatible H.264 MP4 video output |
 
-> GPUs with less than 24 GB VRAM may encounter CUDA out-of-memory errors. The 4-bit quantization option can run with lower VRAM, depending on the full workload.
+> Alpamayo 2 Super is a 34B-parameter model. Full-precision bf16 weights alone occupy roughly 68 GB of VRAM, so plan for a ≥80 GB GPU (or run CARLA on a second GPU). The 4-bit quantization option is untested territory for this checkpoint and may not preserve output quality.
 
 ## 0. Clone the Repository and Submodules
 
-Clone with the NVIDIA Alpamayo 1.5 submodule:
+Clone with the NVIDIA Alpamayo 2 submodule:
 
 ```bash
 git clone --recurse-submodules https://github.com/aveeslab/Carlamayo.git
@@ -29,7 +30,7 @@ If you already cloned the repository without submodules, initialize them from th
 git submodule update --init --recursive
 ```
 
-The Alpamayo source remains in `third_party/alpamayo1.5` as a submodule. This repository does not vendor a copied `src/alpamayo1_5` tree.
+The Alpamayo 2 source remains in `third_party/alpamayo2` as a submodule. This repository does not vendor a copied `src/alpamayo2_super` tree.
 
 ## 1. CARLA Environment Setup
 
@@ -41,7 +42,7 @@ Use this environment for CARLA and data collection.
 mkdir -p ~/carla && cd ~/carla
 wget https://tiny.carla.org/carla-0-9-16-linux
 tar -xvzf carla-0-9-16-linux
-./CarlaUE4.sh -RenderOffScreen
+./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
 ```
 
 > Do not add `-quality-level=Low`; low-quality rendering can make error.
@@ -84,21 +85,21 @@ export PATH="$HOME/.local/bin:$PATH"
 From the repository root:
 
 ```bash
-uv venv a1_5_venv --python 3.12
-source a1_5_venv/bin/activate
+uv venv a2_venv --python 3.12
+source a2_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
-python -m pip install --no-deps -e third_party/alpamayo1.5
-python -m pip install --no-deps -e third_party/oom-free-alpamayo  # optional: enables --oom-free
+python -m pip install --no-deps -e third_party/alpamayo2
 python -m pip install -r requirements-alpamayo.txt
 ```
+
+`uv sync` installs the pinned `torch==2.8.0`, `transformers==4.57.1`, and builds `flash-attn`. If the `flash-attn` build fails, check that the CUDA Toolkit, `nvcc`, and a compatible compiler are visible in the same shell; set `MAX_JOBS` lower if the build exhausts host memory.
 
 ### 2.3 Authenticate with Hugging Face
 
 The model requires access to gated resources. Request access first:
 
-- [PhysicalAI-Autonomous-Vehicles Dataset](https://huggingface.co/datasets/nvidia/PhysicalAI-Autonomous-Vehicles)
-- [Alpamayo Model Weights](https://huggingface.co/nvidia/Alpamayo-1.5-10B)
+- [Alpamayo 2 Super Model Weights](https://huggingface.co/nvidia/Alpamayo2-Super)
 
 Then authenticate:
 
@@ -116,12 +117,11 @@ Closed-loop execution needs Alpamayo and CARLA Python packages in the same envir
 From the repository root, install `requirements-carla.txt`; it pins `carla==0.9.16` to match the CARLA server.
 
 ```bash
-uv venv a1_5_carla_venv --python 3.12
-source a1_5_carla_venv/bin/activate
+uv venv a2_carla_venv --python 3.12
+source a2_carla_venv/bin/activate
 uv sync --active
 python -m ensurepip --upgrade
-python -m pip install --no-deps -e third_party/alpamayo1.5
-python -m pip install --no-deps -e third_party/oom-free-alpamayo  # optional: enables --oom-free
+python -m pip install --no-deps -e third_party/alpamayo2
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
 
