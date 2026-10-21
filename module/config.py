@@ -71,10 +71,12 @@ PID_SPEED_PREVIEW_SEC = 0.5
 PID_TARGET_SPEED_MAX_KMH = 35.0
 PID_STOP_SPEED_MPS = 0.25
 # Start-from-rest: below PID_REST_SPEED_MPS, launch at PID_LAUNCH_SPEED_MPS when the
-# remaining plan still covers at least PID_LAUNCH_MIN_PLAN_M.
+# remaining plan still covers at least PID_LAUNCH_MIN_PLAN_M, and keep launching while
+# it covers at least PID_LAUNCH_HOLD_PLAN_M.
 PID_REST_SPEED_MPS = 0.5
 PID_LAUNCH_SPEED_MPS = 2.0
 PID_LAUNCH_MIN_PLAN_M = 3.0
+PID_LAUNCH_HOLD_PLAN_M = 1.0
 PID_LAT_KP = 1.1
 PID_LAT_KI = 0.02
 PID_LAT_KD = 0.15

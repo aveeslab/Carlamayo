@@ -109,6 +109,7 @@ class OfficialPIDFollower:
             max_brake=cfg.BRAKE_MAX,
             max_steering=0.8,
         )
+        self._launching = False
 
     def _pick_target(self, wp_world, speed_mps):
         lookahead_m = float(
@@ -145,8 +146,9 @@ class OfficialPIDFollower:
 
         From standstill Alpamayo plans a very slow start and every replan restarts it,
         so the ego would never move by tracking the plan alone. While at rest, a plan
-        that still covers at least ``PID_LAUNCH_MIN_PLAN_M`` launches the ego at
-        ``PID_LAUNCH_SPEED_MPS``; once moving, the plan's own speed takes over.
+        that still covers at least ``PID_LAUNCH_MIN_PLAN_M`` (``PID_LAUNCH_HOLD_PLAN_M``
+        once launching) launches the ego at ``PID_LAUNCH_SPEED_MPS``; once moving, the
+        plan's own speed takes over.
         """
         rear_axle = vehicle_tf.transform(carla.Location(x=cfg.EGO_REAR_AXLE_X))
         ego_xy = np.array([rear_axle.x, rear_axle.y])
@@ -156,10 +158,14 @@ class OfficialPIDFollower:
         preview = max(1, round(cfg.PID_SPEED_PREVIEW_SEC / WAYPOINT_DT))
         window = speeds_mps[step:step + preview]
         target_speed_mps = float(np.mean(window)) if len(window) else 0.0
+        # Hysteresis: once launching, keep going until moving unless the plan collapses
+        # below PID_LAUNCH_HOLD_PLAN_M, so a plan hovering around the threshold cannot stall.
+        min_plan_m = cfg.PID_LAUNCH_HOLD_PLAN_M if self._launching else cfg.PID_LAUNCH_MIN_PLAN_M
         launch = (
             speed_mps < cfg.PID_REST_SPEED_MPS
-            and float(np.sum(speeds_mps[step:])) * WAYPOINT_DT >= cfg.PID_LAUNCH_MIN_PLAN_M
+            and float(np.sum(speeds_mps[step:])) * WAYPOINT_DT >= min_plan_m
         )
+        self._launching = launch
         if launch:
             target_speed_mps = max(target_speed_mps, cfg.PID_LAUNCH_SPEED_MPS)
         target_speed_kmh = min(target_speed_mps * 3.6, cfg.PID_TARGET_SPEED_MAX_KMH)

@@ -201,3 +201,19 @@ def test_launch_from_rest_when_the_plan_still_moves(monkeypatch):
         vehicle_tf, wp_world, 0.0, np.full(64, 0.02)
     )
     assert (throttle, brake, debug["launch"]) == (0.0, 1.0, False)
+
+
+def test_launch_holds_while_the_plan_hovers_below_the_start_threshold(monkeypatch):
+    follower = _follower(monkeypatch)
+    wp_world = np.array([[float(x), 0.0, 0.0] for x in range(1, 11)])
+    vehicle_tf = FakeTransform(FakeLocation(-cfg.EGO_REAR_AXLE_X, 0.0, 0.0))
+
+    def plan(total_m):
+        return np.full(64, total_m / 6.4)
+
+    assert follower.compute_control(vehicle_tf, wp_world, 0.0, plan(3.5))[3]["launch"]
+    # Still at rest; the next plan shrinks to 1.5 m but keeps the launch going.
+    assert follower.compute_control(vehicle_tf, wp_world, 0.0, plan(1.5))[3]["launch"]
+    # A plan that collapses to a stop ends it, and 1.5 m alone does not restart it.
+    assert not follower.compute_control(vehicle_tf, wp_world, 0.0, plan(0.5))[3]["launch"]
+    assert not follower.compute_control(vehicle_tf, wp_world, 0.0, plan(1.5))[3]["launch"]
