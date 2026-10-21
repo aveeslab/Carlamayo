@@ -72,3 +72,12 @@ def test_answer_extraction_strips_special_tokens():
         ["<|answer_start|>The light is red.<|answer_end|><|im_end|>"], dtype=object
     )}
     assert a15.extract_answer_text(extra) == "The light is red."
+
+
+def test_rig_fov_keeps_the_calibrated_center_focal_length():
+    from module.adapters._rigs import SEVEN_CAMERA_RIG
+
+    # Pinhole focal length (px at 1920 wide) must equal the f-theta calibration.
+    fov = SEVEN_CAMERA_RIG["camera_front_wide_120fov"]["fov"]
+    assert 960 / np.tan(np.radians(fov / 2)) == pytest.approx(925.540742)
+    assert SEVEN_CAMERA_RIG["camera_front_tele_30fov"]["fov"] == pytest.approx(29.2, abs=0.1)
