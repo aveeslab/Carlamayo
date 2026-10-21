@@ -74,6 +74,7 @@ class FakeWorld:
 
 
 def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypatch):
+    monkeypatch.setattr(cfg, "PID_SPEED_LEAD_SEC", 0.0)
     fake_map = RaisingMap()
     fake_carla = types.SimpleNamespace(
         LaneType=types.SimpleNamespace(Driving=object()),
@@ -157,6 +158,7 @@ def test_planned_speeds_come_from_the_waypoint_timing():
 
 def test_pid_target_speed_follows_the_plan_at_the_elapsed_time(monkeypatch):
     monkeypatch.setattr(cfg, "PID_SPEED_PREVIEW_SEC", 0.5)
+    monkeypatch.setattr(cfg, "PID_SPEED_LEAD_SEC", 0.0)
     follower = _follower(monkeypatch)
     wp_world = np.array([[float(x), 0.0, 0.0] for x in range(1, 11)])
     speeds = np.array([2.0] * 5 + [8.0] * 5)
@@ -166,6 +168,10 @@ def test_pid_target_speed_follows_the_plan_at_the_elapsed_time(monkeypatch):
     assert debug["target_speed_kmh"] == pytest.approx(2.0 * 3.6)
     # Half a second after the prediction the plan has sped up.
     _, _, _, debug = follower.compute_control(vehicle_tf, wp_world, 2.0, speeds, 0.5)
+    assert debug["target_speed_kmh"] == pytest.approx(8.0 * 3.6)
+    # The lead looks the same half second further into the plan from now.
+    monkeypatch.setattr(cfg, "PID_SPEED_LEAD_SEC", 0.5)
+    _, _, _, debug = follower.compute_control(vehicle_tf, wp_world, 2.0, speeds)
     assert debug["target_speed_kmh"] == pytest.approx(8.0 * 3.6)
 
 
@@ -211,7 +217,7 @@ def test_launch_holds_while_the_plan_hovers_below_the_start_threshold(monkeypatc
     def plan(total_m):
         return np.full(64, total_m / 6.4)
 
-    assert follower.compute_control(vehicle_tf, wp_world, 0.0, plan(3.5))[3]["launch"]
+    assert follower.compute_control(vehicle_tf, wp_world, 0.0, plan(4.0))[3]["launch"]
     # Still at rest; the next plan shrinks to 1.5 m but keeps the launch going.
     assert follower.compute_control(vehicle_tf, wp_world, 0.0, plan(1.5))[3]["launch"]
     # A plan that collapses to a stop ends it, and 1.5 m alone does not restart it.

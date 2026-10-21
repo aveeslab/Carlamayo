@@ -141,8 +141,11 @@ class OfficialPIDFollower:
         Steering tracks a lookahead point starting at the waypoint nearest the rear
         axle, so the part of an older (async) trajectory the ego has already driven past
         is skipped. Speed follows the plan's own timing: the mean of ``speeds_mps``
-        (``planned_speeds``) over the next ``PID_SPEED_PREVIEW_SEC`` after
-        ``elapsed_sec`` since the prediction. A planned stop holds the brake.
+        (``planned_speeds``) over ``PID_SPEED_PREVIEW_SEC`` starting
+        ``PID_SPEED_LEAD_SEC`` after now (``elapsed_sec`` since the prediction). The lead
+        covers pedal smoothing and vehicle lag; without it, replanning every tick only
+        ever follows the start of each planned acceleration. A planned stop holds the
+        brake.
 
         From standstill Alpamayo plans a very slow start and every replan restarts it,
         so the ego would never move by tracking the plan alone. While at rest, a plan
@@ -154,7 +157,7 @@ class OfficialPIDFollower:
         ego_xy = np.array([rear_axle.x, rear_axle.y])
         start_idx = int(np.argmin(np.linalg.norm(wp_world[:, :2] - ego_xy, axis=1)))
         wp_world = wp_world[start_idx:]
-        step = int(elapsed_sec / WAYPOINT_DT + 1e-6)
+        step = int((elapsed_sec + cfg.PID_SPEED_LEAD_SEC) / WAYPOINT_DT + 1e-6)
         preview = max(1, round(cfg.PID_SPEED_PREVIEW_SEC / WAYPOINT_DT))
         window = speeds_mps[step:step + preview]
         target_speed_mps = float(np.mean(window)) if len(window) else 0.0

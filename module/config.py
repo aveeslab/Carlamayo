@@ -64,10 +64,12 @@ RESPAWN_COLLISION_COOLDOWN_FRAMES = 10
 PID_LOOKAHEAD_MIN_M = 4.0
 PID_LOOKAHEAD_MAX_M = 12.0
 PID_LOOKAHEAD_SPEED_GAIN = 0.4
-# Target speed = Alpamayo's planned speed, averaged over this much of the plan
-# from now (covers actuator lag), capped at PID_TARGET_SPEED_MAX_KMH. A planned
+# Target speed = Alpamayo's planned speed, averaged over PID_SPEED_PREVIEW_SEC of the
+# plan starting PID_SPEED_LEAD_SEC ahead (covers actuator lag), capped at
+# PID_TARGET_SPEED_MAX_KMH. A planned
 # speed at or below PID_STOP_SPEED_MPS is treated as a stop and holds the brake.
 PID_SPEED_PREVIEW_SEC = 0.5
+PID_SPEED_LEAD_SEC = 1.0
 PID_TARGET_SPEED_MAX_KMH = 35.0
 PID_STOP_SPEED_MPS = 0.25
 # Start-from-rest: below PID_REST_SPEED_MPS, launch at PID_LAUNCH_SPEED_MPS when the
