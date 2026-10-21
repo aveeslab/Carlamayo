@@ -654,11 +654,13 @@ def run(adapter, args):
                 steering = (1.0 - alpha) * prev_control["steer"] + alpha * steering_raw
                 throttle = (1.0 - alpha) * prev_control["throttle"] + alpha * throttle_raw
                 brake = (1.0 - alpha) * prev_control["brake"] + alpha * brake_raw
+                # Keep both smoothed pedals as state and apply only the stronger one, so
+                # throttle builds up while a previous brake is still decaying.
+                prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
                 if throttle >= brake:
                     brake = 0.0
                 else:
                     throttle = 0.0
-                prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
                 carla_if.apply_control(steering, throttle, brake)
                 control_record = {
                     "target_speed_kmh": ctrl_debug.get("target_speed_kmh"),
