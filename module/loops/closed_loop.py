@@ -32,7 +32,7 @@ from module.loops._common import (
     stack_frame_buffer,
 )
 from module.navigation_control import NavigationControlState
-from module.pid_controller import OfficialPIDFollower, trajectory_to_world
+from module.pid_controller import OfficialPIDFollower, planned_speeds, trajectory_to_world
 from module.respawn_control import RespawnMonitor
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.vlm_generate_optimization import VlmGenerateTiming
@@ -545,6 +545,7 @@ def run(adapter, args):
                         current_trajectory_world = trajectory_to_world(
                             latest_result["ego_tf"], current_trajectory
                         )
+                        current_speeds = planned_speeds(current_trajectory)
                         prev_selected_trajectory = current_trajectory.copy()
                         current_pred_xyz = traj_samples
                         current_cot = adapter.extract_cot_text(extra)
@@ -616,6 +617,7 @@ def run(adapter, args):
                         current_trajectory_world = trajectory_to_world(
                             carla_if.ego_vehicle.get_transform(), current_trajectory
                         )
+                        current_speeds = planned_speeds(current_trajectory)
                         prev_selected_trajectory = current_trajectory.copy()
                         current_pred_xyz = traj_samples
                         current_cot = adapter.extract_cot_text(extra)
@@ -645,7 +647,8 @@ def run(adapter, args):
             if current_trajectory is not None and trajectory_age <= cfg.TRAJECTORY_MAX_AGE_SEC:
                 vehicle_tf = carla_if.ego_vehicle.get_transform()
                 steering_raw, throttle_raw, brake_raw, ctrl_debug = pid_follower.compute_control(
-                    vehicle_tf, current_trajectory_world, float(state["speed"])
+                    vehicle_tf, current_trajectory_world, float(state["speed"]),
+                    current_speeds, trajectory_age,
                 )
                 alpha = cfg.CONTROL_SMOOTH_ALPHA
                 steering = (1.0 - alpha) * prev_control["steer"] + alpha * steering_raw
@@ -659,6 +662,7 @@ def run(adapter, args):
                 carla_if.apply_control(steering, throttle, brake)
                 control_record = {
                     "target_speed_kmh": ctrl_debug.get("target_speed_kmh"),
+                    "planned_stop": ctrl_debug.get("planned_stop"),
                     "control_raw": [steering_raw, throttle_raw, brake_raw],
                     "control_applied": [steering, throttle, brake],
                 }
