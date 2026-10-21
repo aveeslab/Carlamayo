@@ -53,6 +53,10 @@ THROTTLE_MAX = 0.6
 BRAKE_MAX = 1.0
 CONTROL_SMOOTH_ALPHA = 0.25
 
+# Async closed loop: brake instead of following a prediction older than this
+# (simulation seconds since its inputs were captured).
+TRAJECTORY_MAX_AGE_SEC = 3.0
+
 # Auto-respawn after collision.
 RESPAWN_COLLISION_COOLDOWN_FRAMES = 10
 

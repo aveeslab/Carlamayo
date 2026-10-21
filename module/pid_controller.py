@@ -59,6 +59,13 @@ def local_to_world(vehicle_tf, wp_local):
     return np.asarray(wp_world, dtype=np.float64)
 
 
+def trajectory_to_world(vehicle_tf, wp_ego):
+    """World xyz of rear-axle-relative Alpamayo waypoints for the pose they were predicted at."""
+    wp_local = alpamayo_to_carla_local(wp_ego)
+    # Alpamayo waypoints start at the rear axle; CARLA transforms use the actor origin.
+    return local_to_world(vehicle_tf, wp_local + [cfg.EGO_REAR_AXLE_X, 0.0, 0.0])
+
+
 @dataclass(frozen=True)
 class RawTargetWaypoint:
     """Minimal waypoint-like target for CARLA VehiclePIDController."""
@@ -118,11 +125,17 @@ class OfficialPIDFollower:
         target_wp = RawTargetWaypoint(carla.Transform(loc, carla.Rotation()))
         return target_wp, target_idx, lookahead_m
 
-    def compute_control(self, vehicle_tf, wp_ego, speed_mps):
-        wp_local = alpamayo_to_carla_local(wp_ego)
-        # Alpamayo waypoints start at the rear axle; CARLA transforms use the actor origin.
-        wp_world = local_to_world(vehicle_tf, wp_local + [cfg.EGO_REAR_AXLE_X, 0.0, 0.0])
-        traj_extent = float(np.max(np.linalg.norm(wp_local[:, :2], axis=1)))
+    def compute_control(self, vehicle_tf, wp_world, speed_mps):
+        """Follow a world-frame trajectory (``trajectory_to_world``) from the current pose.
+
+        Tracking starts at the waypoint nearest the rear axle, so the part of an older
+        (async) trajectory the ego has already driven past is skipped.
+        """
+        rear_axle = vehicle_tf.transform(carla.Location(x=cfg.EGO_REAR_AXLE_X))
+        ego_xy = np.array([rear_axle.x, rear_axle.y])
+        start_idx = int(np.argmin(np.linalg.norm(wp_world[:, :2] - ego_xy, axis=1)))
+        wp_world = wp_world[start_idx:]
+        traj_extent = float(np.max(np.linalg.norm(wp_world[:, :2] - ego_xy, axis=1)))
         target_speed_kmh = float(
             np.clip(
                 cfg.PID_TARGET_SPEED_MIN_KMH + cfg.PID_TARGET_SPEED_EXTENT_GAIN * traj_extent,
@@ -131,6 +144,7 @@ class OfficialPIDFollower:
             )
         )
         target_wp, target_idx, lookahead_m = self._pick_target(wp_world, speed_mps)
+        target_idx += start_idx
         if target_wp is None:
             return 0.0, 0.0, 0.0, {
                 "mode": "official_pid_no_target",

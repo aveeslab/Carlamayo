@@ -99,9 +99,10 @@ def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypa
         dtype=np.float64,
     )
 
+    wp_world = pid_controller.trajectory_to_world(vehicle_tf, wp_ego)
     steer, throttle, brake, debug = follower.compute_control(
         vehicle_tf,
-        wp_ego,
+        wp_world,
         speed_mps=0.0,
     )
 
@@ -114,3 +115,22 @@ def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypa
     assert debug["target_idx"] == 1
     assert debug["target_raw_xy"] == pytest.approx([15.0 + cfg.EGO_REAR_AXLE_X, 20.0])
     assert debug["target_projected_to_road"] is False
+
+
+def test_pid_follower_skips_waypoints_the_ego_already_passed(monkeypatch):
+    monkeypatch.setattr(pid_controller, "carla", types.SimpleNamespace(
+        Location=FakeLocation, Rotation=FakeRotation, Transform=FakeTransform,
+    ))
+    monkeypatch.setattr(
+        pid_controller, "_resolve_vehicle_pid_controller", lambda: RecordingVehiclePIDController
+    )
+    follower = pid_controller.OfficialPIDFollower(FakeWorld(RaisingMap()), FakeVehicle())
+    # World-frame plan from an older (async) prediction along +x.
+    wp_world = np.array([[0.0, 0.0, 0.0], [4.0, 0.0, 0.0], [8.0, 0.0, 0.0], [12.0, 0.0, 0.0]])
+    # The ego's rear axle has since reached x=4.2, past the first waypoint.
+    vehicle_tf = FakeTransform(FakeLocation(4.2 - cfg.EGO_REAR_AXLE_X, 0.0, 0.0))
+
+    follower.compute_control(vehicle_tf, wp_world, speed_mps=0.0)
+
+    # Lookahead (4 m at standstill) is measured from the nearest waypoint (x=4), not x=0.
+    assert follower.pid.last_waypoint.transform.location.x == pytest.approx(8.0)

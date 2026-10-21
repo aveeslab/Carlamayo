@@ -31,7 +31,7 @@ from module.loops._common import (
     stack_frame_buffer,
 )
 from module.navigation_control import NavigationControlState
-from module.pid_controller import OfficialPIDFollower
+from module.pid_controller import OfficialPIDFollower, trajectory_to_world
 from module.respawn_control import RespawnMonitor
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.vlm_generate_optimization import VlmGenerateTiming
@@ -181,6 +181,7 @@ def run(adapter, args):
         pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
 
         current_trajectory = None
+        current_trajectory_world = None
         current_pred_xyz = None
         prev_selected_trajectory = None
         current_selected_traj_idx = 0
@@ -294,6 +295,7 @@ def run(adapter, args):
                     "vqa_question": nav_state.vqa_question,
                     "prompt_revision": nav_state.revision,
                     "respawn_revision": respawn_revision,
+                    "ego_tf": carla_if.ego_vehicle.get_transform(),
                 }
 
             def _inference_worker():
@@ -347,6 +349,7 @@ def run(adapter, args):
                                 "navigation_weight": navigation_weight,
                                 "history_xyz": req["history_xyz"],
                                 "history_rot": req["history_rot"],
+                                "ego_tf": req["ego_tf"],
                                 "prompt_revision": req["prompt_revision"],
                                 "respawn_revision": req["respawn_revision"],
                             }
@@ -535,6 +538,11 @@ def run(adapter, args):
                         )
                         current_selected_traj_idx = selected_idx
                         current_trajectory = traj_samples[selected_idx]
+                        # Anchor the plan at the pose it was predicted from, not the
+                        # pose the ego has reached by the time the result arrives.
+                        current_trajectory_world = trajectory_to_world(
+                            latest_result["ego_tf"], current_trajectory
+                        )
                         prev_selected_trajectory = current_trajectory.copy()
                         current_pred_xyz = traj_samples
                         current_cot = adapter.extract_cot_text(extra)
@@ -603,6 +611,9 @@ def run(adapter, args):
                         )
                         current_selected_traj_idx = selected_idx
                         current_trajectory = traj_samples[selected_idx]
+                        current_trajectory_world = trajectory_to_world(
+                            carla_if.ego_vehicle.get_transform(), current_trajectory
+                        )
                         prev_selected_trajectory = current_trajectory.copy()
                         current_pred_xyz = traj_samples
                         current_cot = adapter.extract_cot_text(extra)
@@ -625,10 +636,14 @@ def run(adapter, args):
                             f"{cfg.NUM_TRAJ_SAMPLES - 1}"
                         )
 
-            if current_trajectory is not None:
+            trajectory_age = (
+                None if current_trajectory_frame is None
+                else (frame_count - current_trajectory_frame) * cfg.CONTROL_DT
+            )
+            if current_trajectory is not None and trajectory_age <= cfg.TRAJECTORY_MAX_AGE_SEC:
                 vehicle_tf = carla_if.ego_vehicle.get_transform()
                 steering_raw, throttle_raw, brake_raw, ctrl_debug = pid_follower.compute_control(
-                    vehicle_tf, current_trajectory[:, :3], float(state["speed"])
+                    vehicle_tf, current_trajectory_world, float(state["speed"])
                 )
                 alpha = cfg.CONTROL_SMOOTH_ALPHA
                 steering = (1.0 - alpha) * prev_control["steer"] + alpha * steering_raw
@@ -673,9 +688,13 @@ def run(adapter, args):
                     f"Steer: {steering:.4f}, Throttle: {throttle:.3f}, Brake: {brake:.3f}"
                 )
                 if args.async_mode:
-                    trajectory_age = (frame_count - current_trajectory_frame) * cfg.CONTROL_DT
                     print(f"    Trajectory age: {trajectory_age:.1f}s (sim)")
             else:
+                if current_trajectory is not None:
+                    print(
+                        f"[Frame {frame_count}] Trajectory is {trajectory_age:.1f}s old (sim); "
+                        "braking until a newer prediction arrives."
+                    )
                 carla_if.apply_control(0.0, 0.0, 1.0)
                 control_record = {"control_applied": [0.0, 0.0, 1.0]}
                 latest_telemetry = {
@@ -694,10 +713,6 @@ def run(adapter, args):
                         trajectory=current_trajectory,
                         inference_time=current_inference_time,
                     )
-                trajectory_age = (
-                    None if current_trajectory_frame is None
-                    else round((frame_count - current_trajectory_frame) * cfg.CONTROL_DT, 3)
-                )
                 run_recorder.add_record({
                     "frame_id": carla_if.frame_id,
                     "frame_count": frame_count,
