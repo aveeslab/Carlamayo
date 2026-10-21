@@ -115,7 +115,26 @@ the vehicle in this mode.
 
 Output: `carla_alpamayo_live_open_loop_result.mp4`
 
-## 5. NVIDIA Original Test Scripts
+## 5. Debug Recording
+
+Add `--record-dir <dir>` to a closed-loop or live-open-loop run to save what the
+model saw and what the controller did:
+
+- `<dir>/camera_*/<frame>.jpg` and `<dir>/trajectory.json` in the data collection
+  layout, so the run replays offline with `--loop open --data-root <dir>`.
+- `<dir>/records.jsonl`, one line per tick: ego pose and speed, the ego history,
+  CoT, and trajectory of each new inference, trajectory age, raw and applied
+  controls, and ground truth for nearby actors (Alpamayo-frame position plus
+  OpenDRIVE road/lane ids and a same-lane flag).
+
+```bash
+python carlamayo.py --loop closed --version 1.5 --record-dir runs/closed_001
+python carlamayo.py --loop open --version 1.5 --data-root runs/closed_001
+```
+
+Recording writes one JPEG per camera per tick, which slows the loop.
+
+## 6. NVIDIA Original Test Scripts
 
 Each Alpamayo submodule ships its own smoke script and downloads its own gated
 weights (large; see each model card for the license before use):

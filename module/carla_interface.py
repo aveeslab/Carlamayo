@@ -324,6 +324,44 @@ class CARLAInterface:
             poses, list(range(len(poses))), len(poses) - 1, num_history_steps=cfg.NUM_HISTORY
         )
 
+    def get_nearby_actors(self, radius_m=40.0):
+        """Ground truth for actors near the ego: Alpamayo-frame xy and lane ids.
+
+        ``same_lane`` compares OpenDRIVE road/lane ids with the ego's driving lane;
+        on one road, lanes with opposite-sign ``lane_id`` run in opposite directions.
+        """
+        carla_map = self.world.get_map()
+        ego_tf = self.ego_vehicle.get_transform()
+        to_ego = np.array(ego_tf.get_inverse_matrix())
+        ego_wp = carla_map.get_waypoint(ego_tf.location)
+        nearby = []
+        for actor in self.world.get_actors():
+            if actor.id == self.ego_vehicle.id or not actor.type_id.startswith(
+                ("vehicle.", "walker.pedestrian.", "static.prop.")
+            ):
+                continue
+            loc = actor.get_location()
+            if loc.distance(ego_tf.location) > radius_m:
+                continue
+            local = to_ego @ np.array([loc.x, loc.y, loc.z, 1.0])
+            wp = carla_map.get_waypoint(loc, project_to_road=False, lane_type=carla.LaneType.Any)
+            nearby.append({
+                "id": actor.id,
+                "type": actor.type_id,
+                "xy": [round(float(local[0]), 2), round(float(-local[1]), 2)],
+                "road_id": wp.road_id if wp else None,
+                "lane_id": wp.lane_id if wp else None,
+                "lane_type": str(wp.lane_type) if wp else None,
+                "same_lane": bool(
+                    wp and wp.road_id == ego_wp.road_id and wp.lane_id == ego_wp.lane_id
+                ),
+            })
+        return {
+            "ego_road_id": ego_wp.road_id,
+            "ego_lane_id": ego_wp.lane_id,
+            "actors": nearby,
+        }
+
     def apply_control(self, steering, throttle, brake):
         control = carla.VehicleControl()
         control.steer = float(steering)

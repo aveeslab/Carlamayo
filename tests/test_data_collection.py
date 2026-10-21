@@ -1,10 +1,15 @@
+import json
 import queue
 
+import numpy as np
+
 from module.data_collection import (
+    RunRecorder,
     collect_synchronous_sensor_frame,
     frame_file_path,
     frame_is_complete,
 )
+from module.open_loop_dataset import load_front_camera_image, load_trajectory_index
 
 
 def test_frame_is_complete_requires_all_sensor_outputs(tmp_path):
@@ -35,3 +40,20 @@ def test_collect_synchronous_sensor_frame_keeps_only_exact_tick():
     )
 
     assert frame == {"camera": "current-camera", "lidar": "current-lidar"}
+
+
+def test_run_recorder_writes_an_open_loop_replayable_run(tmp_path):
+    recorder = RunRecorder(tmp_path, ["cam_a"])
+    red = np.zeros((8, 8, 3), dtype=np.uint8)
+    red[..., 0] = 255
+    pose = {"x": 1, "y": 2, "z": 0, "roll": 0, "pitch": 0, "yaw": 90, "speed": 3}
+    recorder.add_frame(12, [red], pose)
+    recorder.add_record({"frame_id": 12, "trajectory": np.zeros((2, 3), dtype=np.float32)})
+    recorder.close()
+
+    trajectory, frame_ids = load_trajectory_index(tmp_path)
+    assert frame_ids == [12] and trajectory["12"]["yaw"] == 90
+    image = load_front_camera_image(tmp_path, 12, camera_name="cam_a")
+    assert image[0, 0, 0] > 200 and image[0, 0, 2] < 50  # saved as RGB, not swapped
+    record = json.loads((tmp_path / "records.jsonl").read_text())
+    assert record["trajectory"] == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]

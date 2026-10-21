@@ -90,6 +90,9 @@ def build_parser(preset_loop=None):
                         help="[closed] Initial VQA question for --mode vqa.")
     parser.add_argument("--debug-worker-traceback", action="store_true",
                         help="[closed, live-open] Print async worker tracebacks on failure.")
+    parser.add_argument("--record-dir", default=None,
+                        help="[closed, live-open] Record camera frames, trajectory.json and "
+                             "per-tick records.jsonl here; replay with --loop open --data-root.")
     return parser
 
 

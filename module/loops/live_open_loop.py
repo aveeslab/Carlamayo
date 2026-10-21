@@ -21,6 +21,7 @@ import torch
 
 from module import config as cfg
 from module.carla_interface import CARLAInterface
+from module.data_collection import RunRecorder
 from module.inference import (
     configure_cuda_linalg_library,
     extract_trajectory_samples,
@@ -84,12 +85,14 @@ def run(adapter, args):
     carla_if = CARLAInterface(camera_configs=adapter.source_camera_configs)
     video_recorder = VideoRecorder(output_video, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
     vlm_generate_timing = VlmGenerateTiming()
+    run_recorder = None
 
     current_pred_xyz = None
     current_selected_traj_idx = 0
     prev_selected_trajectory = None
     current_cot = ""
     current_inference_time = 0.0
+    new_inference = None
     frame_buffer = []
 
     pending_inference = False
@@ -113,9 +116,9 @@ def run(adapter, args):
             configure_cuda_linalg_library("magma")
             return _run_once()
 
-    def _ingest_result(pred_xyz, extra, inference_time, submitted_frame):
+    def _ingest_result(pred_xyz, extra, inference_time, submitted_frame, history_xyz, history_rot):
         nonlocal current_pred_xyz, current_selected_traj_idx, prev_selected_trajectory
-        nonlocal current_cot, current_inference_time
+        nonlocal current_cot, current_inference_time, new_inference
         traj_samples = extract_trajectory_samples(pred_xyz)
         selected_idx, _scores = select_trajectory_by_prev_similarity(
             traj_samples, prev_selected_trajectory
@@ -125,6 +128,14 @@ def run(adapter, args):
         current_pred_xyz = traj_samples
         current_cot = adapter.extract_cot_text(extra)
         current_inference_time = inference_time
+        new_inference = {
+            "frame_submitted": submitted_frame,
+            "history_xyz": history_xyz,
+            "history_rot": history_rot,
+            "cot": current_cot,
+            "trajectory": prev_selected_trajectory,
+            "inference_time": inference_time,
+        }
         print(f"[Frame {frame_count}] Inference: {inference_time:.2f}s "
               f"(submitted at frame {submitted_frame})")
         print(f"    CoT: {current_cot[:70]}")
@@ -138,6 +149,9 @@ def run(adapter, args):
         carla_if.spawn_npcs(num_vehicles=cfg.NPC_VEHICLE_COUNT, num_walkers=cfg.NPC_WALKER_COUNT)
         carla_if.setup_cameras()
         carla_if.setup_collision_sensor()
+        if args.record_dir:
+            run_recorder = RunRecorder(args.record_dir, carla_if.camera_order)
+            print(f"Recording debug run to: {args.record_dir}")
         time.sleep(1.0)
 
         if args.oom_free:
@@ -176,6 +190,8 @@ def run(adapter, args):
                             "pred_xyz": pred_xyz, "extra": extra,
                             "inference_time": time.time() - t0,
                             "frame_submitted": int(req["frame"]),
+                            "history_xyz": req["history_xyz"],
+                            "history_rot": req["history_rot"],
                         }
                     except Exception as e:
                         result = {"error": str(e), "traceback": traceback.format_exc()}
@@ -221,6 +237,9 @@ def run(adapter, args):
             frame_buffer.append(images)
             if len(frame_buffer) > cfg.NUM_FRAMES:
                 frame_buffer.pop(0)
+            if run_recorder is not None:
+                run_recorder.add_frame(carla_if.frame_id, images, state)
+            new_inference = None
 
             if len(frame_buffer) >= cfg.NUM_FRAMES:
                 if args.async_mode:
@@ -262,6 +281,8 @@ def run(adapter, args):
                                 latest_result["pred_xyz"], latest_result["extra"],
                                 float(latest_result["inference_time"]),
                                 latest_result["frame_submitted"],
+                                latest_result["history_xyz"],
+                                latest_result["history_rot"],
                             )
                 else:
                     images_array = stack_frame_buffer(frame_buffer, num_cameras)
@@ -272,7 +293,10 @@ def run(adapter, args):
                     )
                     model_start = time.time()
                     pred_xyz, extra = _run_inference_with_linalg_fallback(model_data)
-                    _ingest_result(pred_xyz, extra, time.time() - model_start, frame_count)
+                    _ingest_result(
+                        pred_xyz, extra, time.time() - model_start, frame_count,
+                        history_xyz, history_rot,
+                    )
 
             if current_pred_xyz is not None and cfg.SAVE_VIDEO:
                 vis_frame = create_live_open_loop_visualization_frame(
@@ -287,6 +311,15 @@ def run(adapter, args):
                 f"Steer: {control['steer']:.4f}, Throttle: {control['throttle']:.3f}, "
                 f"Brake: {control['brake']:.3f}"
             )
+            if run_recorder is not None:
+                run_recorder.add_record({
+                    "frame_id": carla_if.frame_id,
+                    "frame_count": frame_count,
+                    "ego": state,
+                    "inference": new_inference,
+                    "autopilot_control": control,
+                    "nearby": carla_if.get_nearby_actors(),
+                })
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user.")
@@ -309,6 +342,8 @@ def run(adapter, args):
                 pass
         if cfg.SAVE_VIDEO and video_recorder:
             video_recorder.save()
+        if run_recorder is not None:
+            run_recorder.close()
         carla_if.cleanup()
 
     print("\nStopped.")
