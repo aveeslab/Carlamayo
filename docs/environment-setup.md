@@ -43,7 +43,7 @@ Use this environment for CARLA and data collection.
 ```bash
 mkdir -p ~/carla && cd ~/carla
 wget https://downloads.carlasim.com/Linux/CARLA_0.9.16.tar.gz
-tar -xvzf carla-0-9-16-linux
+tar -xvzf CARLA_0.9.16.tar.gz
 ./CarlaUE4.sh -RenderOffScreen
 ```
 
