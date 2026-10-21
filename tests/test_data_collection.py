@@ -57,3 +57,18 @@ def test_run_recorder_writes_an_open_loop_replayable_run(tmp_path):
     assert image[0, 0, 0] > 200 and image[0, 0, 2] < 50  # saved as RGB, not swapped
     record = json.loads((tmp_path / "records.jsonl").read_text())
     assert record["trajectory"] == [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
+
+
+def test_run_recorder_keeps_a_replayable_trajectory_before_close(tmp_path, monkeypatch):
+    monkeypatch.setattr(RunRecorder, "TRAJECTORY_SAVE_EVERY", 2)
+    recorder = RunRecorder(tmp_path, ["cam_a"])
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    pose = {"x": 0, "y": 0, "z": 0, "roll": 0, "pitch": 0, "yaw": 0}
+    recorder.add_frame(1, [image], pose)
+    recorder.add_frame(2, [image], pose)
+    recorder.add_record({"frame_id": 2})
+
+    # No close(): an aborted run still leaves the trajectory and the records on disk.
+    _, frame_ids = load_trajectory_index(tmp_path)
+    assert frame_ids == [1, 2]
+    assert json.loads((tmp_path / "records.jsonl").read_text()) == {"frame_id": 2}

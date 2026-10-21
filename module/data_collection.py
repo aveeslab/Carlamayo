@@ -62,8 +62,11 @@ class RunRecorder:
 
     Camera JPEGs and ``trajectory.json`` use the ``data_collect.py`` layout, so a
     recording replays directly with ``--loop open --data-root <dir>``. Per-tick
-    model and control state goes to ``records.jsonl``.
+    model and control state goes to ``records.jsonl``. Both are kept on disk while
+    recording, because CARLA's Traffic Manager can abort the whole process.
     """
+
+    TRAJECTORY_SAVE_EVERY = 50
 
     def __init__(self, output_dir, camera_names):
         self.output_dir = output_dir
@@ -71,7 +74,7 @@ class RunRecorder:
         for name in self.camera_names:
             os.makedirs(os.path.join(output_dir, name), exist_ok=True)
         self.poses = {}
-        self._records = open(os.path.join(output_dir, "records.jsonl"), "w")
+        self._records = open(os.path.join(output_dir, "records.jsonl"), "w", buffering=1)
 
     def add_frame(self, frame_id, images_rgb, pose):
         for name, image in zip(self.camera_names, images_rgb):
@@ -82,14 +85,21 @@ class RunRecorder:
         self.poses[int(frame_id)] = {
             key: round(float(pose[key]), 6) for key in ("x", "y", "z", "pitch", "yaw", "roll")
         }
+        if len(self.poses) % self.TRAJECTORY_SAVE_EVERY == 0:
+            self._save_trajectory()
 
     def add_record(self, record):
         self._records.write(json.dumps(record, default=_to_jsonable) + "\n")
 
     def close(self):
         self._records.close()
-        with open(os.path.join(self.output_dir, "trajectory.json"), "w") as f:
+        self._save_trajectory()
+
+    def _save_trajectory(self):
+        path = os.path.join(self.output_dir, "trajectory.json")
+        with open(path + ".tmp", "w") as f:
             json.dump(self.poses, f, indent=4)
+        os.replace(path + ".tmp", path)
 
 
 def _to_jsonable(value):
