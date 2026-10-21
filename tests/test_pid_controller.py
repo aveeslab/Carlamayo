@@ -103,8 +103,7 @@ def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypa
     steer, throttle, brake, debug = follower.compute_control(
         vehicle_tf,
         wp_world,
-        0.0,
-        pid_controller.planned_speeds(wp_ego),
+        speed_mps=0.0,
     )
 
     assert fake_map.called is False
@@ -131,51 +130,7 @@ def test_pid_follower_skips_waypoints_the_ego_already_passed(monkeypatch):
     # The ego's rear axle has since reached x=4.2, past the first waypoint.
     vehicle_tf = FakeTransform(FakeLocation(4.2 - cfg.EGO_REAR_AXLE_X, 0.0, 0.0))
 
-    follower.compute_control(vehicle_tf, wp_world, 0.0, np.full(4, 5.0))
+    follower.compute_control(vehicle_tf, wp_world, speed_mps=0.0)
 
     # Lookahead (4 m at standstill) is measured from the nearest waypoint (x=4), not x=0.
     assert follower.pid.last_waypoint.transform.location.x == pytest.approx(8.0)
-
-
-def _follower(monkeypatch, brake=0.0):
-    class FixedPID(RecordingVehiclePIDController):
-        def run_step(self, target_speed, waypoint):
-            self.last_target_speed = target_speed
-            return types.SimpleNamespace(steer=0.0, throttle=0.0 if brake else 0.5, brake=brake)
-
-    monkeypatch.setattr(pid_controller, "carla", types.SimpleNamespace(
-        Location=FakeLocation, Rotation=FakeRotation, Transform=FakeTransform,
-    ))
-    monkeypatch.setattr(pid_controller, "_resolve_vehicle_pid_controller", lambda: FixedPID)
-    return pid_controller.OfficialPIDFollower(FakeWorld(RaisingMap()), FakeVehicle())
-
-
-def test_planned_speeds_come_from_the_waypoint_timing():
-    wp_ego = np.array([[1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [4.0, 0.0, 0.0]])
-    np.testing.assert_allclose(pid_controller.planned_speeds(wp_ego), [10.0, 10.0, 20.0])
-
-
-def test_pid_target_speed_follows_the_plan_at_the_elapsed_time(monkeypatch):
-    monkeypatch.setattr(cfg, "PID_SPEED_PREVIEW_SEC", 0.5)
-    follower = _follower(monkeypatch)
-    wp_world = np.array([[float(x), 0.0, 0.0] for x in range(1, 11)])
-    speeds = np.array([2.0] * 5 + [8.0] * 5)
-    vehicle_tf = FakeTransform(FakeLocation(-cfg.EGO_REAR_AXLE_X, 0.0, 0.0))
-
-    _, _, _, debug = follower.compute_control(vehicle_tf, wp_world, 2.0, speeds)
-    assert debug["target_speed_kmh"] == pytest.approx(2.0 * 3.6)
-    # Half a second after the prediction the plan has sped up.
-    _, _, _, debug = follower.compute_control(vehicle_tf, wp_world, 2.0, speeds, 0.5)
-    assert debug["target_speed_kmh"] == pytest.approx(8.0 * 3.6)
-
-
-def test_planned_stop_holds_the_brake_instead_of_creeping(monkeypatch):
-    follower = _follower(monkeypatch)
-    wp_world = np.zeros((4, 3))
-    vehicle_tf = FakeTransform(FakeLocation(-cfg.EGO_REAR_AXLE_X, 0.0, 0.0))
-    stop = np.zeros(4)
-
-    _, throttle, brake, debug = follower.compute_control(vehicle_tf, wp_world, 0.0, stop)
-    assert (throttle, brake, debug["planned_stop"]) == (0.0, 1.0, True)
-    _, throttle, brake, _ = follower.compute_control(vehicle_tf, wp_world, 5.0, stop)
-    assert (throttle, brake) == (0.0, 0.25)
