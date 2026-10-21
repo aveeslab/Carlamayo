@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from . import config as cfg
+from .data_collection import collect_synchronous_sensor_frame
 from .open_loop_dataset import build_ego_history
 
 
@@ -33,7 +34,9 @@ class CARLAInterface:
         self.world = None
         self.ego_vehicle = None
         self.sensors = {}
-        self.sensor_queues = {}
+        # One queue for all cameras: (frame, name, image), matched to world.tick().
+        self.sensor_queue = queue.Queue()
+        self.frame_id = None
         self.collision_events = []
         self.history_buffer = []
         self.npc_vehicle_ids = []
@@ -211,7 +214,6 @@ class CARLAInterface:
         self.apply_control(0.0, 0.0, 1.0)
         self.history_buffer.clear()
         self.reset_collision_history()
-        self.flush_camera_queues()
         return spawn_point
 
     def setup_cameras(self):
@@ -231,8 +233,7 @@ class CARLAInterface:
                 carla.Rotation(pitch=cfg_cam["pitch"], yaw=cfg_cam["yaw"]),
             )
             sensor = self.world.spawn_actor(cam_bp, transform, attach_to=self.ego_vehicle)
-            self.sensor_queues[name] = queue.Queue()
-            sensor.listen(lambda data, n=name: self._camera_callback(data, n))
+            sensor.listen(lambda data, n=name: self.sensor_queue.put((data.frame, n, data)))
             self.sensors[name] = sensor
             time.sleep(0.2)
 
@@ -274,32 +275,24 @@ class CARLAInterface:
     def reset_collision_history(self):
         self.collision_events.clear()
 
-    def flush_camera_queues(self):
-        for sensor_queue in self.sensor_queues.values():
-            while True:
-                try:
-                    sensor_queue.get_nowait()
-                except queue.Empty:
-                    break
+    def get_camera_images(self, frame_id=None, timeout=5.0):
+        """Return RGB images from every camera for exactly one world tick.
 
-    def _camera_callback(self, image, name):
-        if not self.sensor_queues[name].full():
-            self.sensor_queues[name].put(image)
-
-    def get_camera_images(self):
-        images = []
-        missing = []
-        for name in self.camera_order:
-            try:
-                data = self.sensor_queues[name].get(timeout=1.0)
-                array = np.frombuffer(data.raw_data, dtype=np.uint8)
-                array = array.reshape((cfg.IMG_HEIGHT, cfg.IMG_WIDTH, 4))[:, :, :3]
-                array = cv2.cvtColor(array, cv2.COLOR_BGR2RGB)
-                images.append(array)
-            except queue.Empty:
-                missing.append(name)
+        Defaults to the frame returned by the last ``tick()``; frames from other
+        ticks (late arrivals, skipped ticks) are discarded rather than mixed in.
+        """
+        frame_id = self.frame_id if frame_id is None else frame_id
+        frame_data = collect_synchronous_sensor_frame(
+            self.sensor_queue, self.camera_order, frame_id, timeout=timeout
+        )
+        missing = [name for name in self.camera_order if name not in frame_data]
         if missing:
             raise TimeoutError(f"Missing camera frames: {missing}")
+        images = []
+        for name in self.camera_order:
+            array = np.frombuffer(frame_data[name].raw_data, dtype=np.uint8)
+            array = array.reshape((cfg.IMG_HEIGHT, cfg.IMG_WIDTH, 4))[:, :, :3]
+            images.append(cv2.cvtColor(array, cv2.COLOR_BGR2RGB))
         return np.array(images)
 
     def get_ego_state(self):
@@ -364,7 +357,8 @@ class CARLAInterface:
         }
 
     def tick(self):
-        self.world.tick()
+        self.frame_id = self.world.tick()
+        return self.frame_id
 
     def cleanup(self):
         print("\nCleaning up...")

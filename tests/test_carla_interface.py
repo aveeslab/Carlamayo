@@ -1,8 +1,8 @@
 import importlib
-import queue
 import sys
 import types
 
+import numpy as np
 import pytest
 
 
@@ -13,21 +13,37 @@ fake_carla = types.SimpleNamespace(
 )
 sys.modules.setdefault("carla", fake_carla)
 
-CARLAInterface = importlib.import_module("module.carla_interface").CARLAInterface
+carla_interface = importlib.import_module("module.carla_interface")
+CARLAInterface = carla_interface.CARLAInterface
 
 
-class EmptyCameraQueue:
-    def get(self, timeout):
-        raise queue.Empty
+class FakeImage:
+    def __init__(self, value):
+        self.raw_data = np.full((2, 3, 4), value, dtype=np.uint8).tobytes()
+
+
+def test_get_camera_images_uses_only_the_ticked_frame(monkeypatch):
+    monkeypatch.setattr(carla_interface.cfg, "IMG_HEIGHT", 2)
+    monkeypatch.setattr(carla_interface.cfg, "IMG_WIDTH", 3)
+    carla_if = CARLAInterface()
+    carla_if.camera_order = ["cam_a", "cam_b"]
+    for frame, name, value in [(6, "cam_a", 1), (7, "cam_b", 2), (7, "cam_a", 3)]:
+        carla_if.sensor_queue.put((frame, name, FakeImage(value)))
+    carla_if.frame_id = 7
+
+    images = carla_if.get_camera_images()
+
+    # The stale frame-6 image is skipped and the output follows camera_order.
+    assert images[:, 0, 0, 0].tolist() == [3, 2]
 
 
 def test_get_camera_images_raises_when_camera_frame_missing():
     carla_if = CARLAInterface()
     carla_if.camera_order = ["cam_front_wide"]
-    carla_if.sensor_queues = {"cam_front_wide": EmptyCameraQueue()}
+    carla_if.sensor_queue.put((7, "cam_front_wide", FakeImage(0)))
 
     with pytest.raises(TimeoutError, match=r"Missing camera frames: \['cam_front_wide'\]"):
-        carla_if.get_camera_images()
+        carla_if.get_camera_images(frame_id=8, timeout=0.1)
 
 
 def test_closed_loop_history_uses_alpamayo_y_left():
