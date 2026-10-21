@@ -11,6 +11,9 @@ import numpy as np
 
 from . import config as cfg
 
+# Alpamayo predicts 64 waypoints at 10 Hz (6.4 s).
+WAYPOINT_DT = 0.1
+
 
 def _resolve_vehicle_pid_controller():
     """Import VehiclePIDController, auto-adding env/relative CARLA agent paths."""
@@ -64,6 +67,12 @@ def trajectory_to_world(vehicle_tf, wp_ego):
     wp_local = alpamayo_to_carla_local(wp_ego)
     # Alpamayo waypoints start at the rear axle; CARLA transforms use the actor origin.
     return local_to_world(vehicle_tf, wp_local + [cfg.EGO_REAR_AXLE_X, 0.0, 0.0])
+
+
+def planned_speeds(wp_ego):
+    """Planned speed (m/s) over each 0.1 s step of a rear-axle-relative Alpamayo trajectory."""
+    xy = np.vstack([np.zeros((1, 2)), np.asarray(wp_ego)[:, :2]])
+    return np.linalg.norm(np.diff(xy, axis=0), axis=1) / WAYPOINT_DT
 
 
 @dataclass(frozen=True)
@@ -125,32 +134,33 @@ class OfficialPIDFollower:
         target_wp = RawTargetWaypoint(carla.Transform(loc, carla.Rotation()))
         return target_wp, target_idx, lookahead_m
 
-    def compute_control(self, vehicle_tf, wp_world, speed_mps):
+    def compute_control(self, vehicle_tf, wp_world, speed_mps, speeds_mps, elapsed_sec=0.0):
         """Follow a world-frame trajectory (``trajectory_to_world``) from the current pose.
 
-        Tracking starts at the waypoint nearest the rear axle, so the part of an older
-        (async) trajectory the ego has already driven past is skipped.
+        Steering tracks a lookahead point starting at the waypoint nearest the rear
+        axle, so the part of an older (async) trajectory the ego has already driven past
+        is skipped. Speed follows the plan's own timing: the mean of ``speeds_mps``
+        (``planned_speeds``) over the next ``PID_SPEED_PREVIEW_SEC`` after
+        ``elapsed_sec`` since the prediction. A planned stop holds the brake.
         """
         rear_axle = vehicle_tf.transform(carla.Location(x=cfg.EGO_REAR_AXLE_X))
         ego_xy = np.array([rear_axle.x, rear_axle.y])
         start_idx = int(np.argmin(np.linalg.norm(wp_world[:, :2] - ego_xy, axis=1)))
         wp_world = wp_world[start_idx:]
-        traj_extent = float(np.max(np.linalg.norm(wp_world[:, :2] - ego_xy, axis=1)))
-        target_speed_kmh = float(
-            np.clip(
-                cfg.PID_TARGET_SPEED_MIN_KMH + cfg.PID_TARGET_SPEED_EXTENT_GAIN * traj_extent,
-                cfg.PID_TARGET_SPEED_MIN_KMH,
-                cfg.PID_TARGET_SPEED_MAX_KMH,
-            )
-        )
+        step = int(elapsed_sec / WAYPOINT_DT + 1e-6)
+        preview = max(1, round(cfg.PID_SPEED_PREVIEW_SEC / WAYPOINT_DT))
+        window = speeds_mps[step:step + preview]
+        target_speed_mps = float(np.mean(window)) if len(window) else 0.0
+        target_speed_kmh = min(target_speed_mps * 3.6, cfg.PID_TARGET_SPEED_MAX_KMH)
         target_wp, target_idx, lookahead_m = self._pick_target(wp_world, speed_mps)
         target_idx += start_idx
-        if target_wp is None:
-            return 0.0, 0.0, 0.0, {
-                "mode": "official_pid_no_target",
-                "traj_extent": traj_extent,
-            }
         control = self.pid.run_step(target_speed_kmh, target_wp)
+        throttle, brake = float(control.throttle), float(control.brake)
+        planned_stop = target_speed_mps <= cfg.PID_STOP_SPEED_MPS
+        if planned_stop:
+            # Same stop handling as CARLA's Alpamayo example: brake at least 0.25 while
+            # moving and hold full brake once (nearly) stopped, never creep forward.
+            throttle, brake = 0.0, (1.0 if speed_mps < 0.15 else max(brake, 0.25))
         debug = {
             "mode": "official_pid",
             "target_speed_kmh": target_speed_kmh,
@@ -165,6 +175,6 @@ class OfficialPIDFollower:
                 float(target_wp.transform.location.y),
             ],
             "target_projected_to_road": False,
-            "traj_extent": traj_extent,
+            "planned_stop": planned_stop,
         }
-        return float(control.steer), float(control.throttle), float(control.brake), debug
+        return float(control.steer), throttle, brake, debug
