@@ -37,6 +37,7 @@ class Alpamayo15Adapter(AlpamayoAdapter):
 
     def load_model(
         self, use_quantization=False, device_map="auto", oom_free=False, oom_kwargs=None,
+        max_memory=None,
     ):
         from module.alpamayo_compat import patch_legacy_hydra_targets
 
@@ -63,11 +64,12 @@ class Alpamayo15Adapter(AlpamayoAdapter):
                 self.model_id,
                 quantization_config=quantization_config,
                 device_map=device_map,
+                max_memory=max_memory,
                 torch_dtype=torch.bfloat16,
             )
         elif device_map:
             model = Alpamayo1_5.from_pretrained(
-                self.model_id, dtype=torch.bfloat16, device_map=device_map
+                self.model_id, dtype=torch.bfloat16, device_map=device_map, max_memory=max_memory
             )
         else:
             model = Alpamayo1_5.from_pretrained(self.model_id, dtype=torch.bfloat16).to("cuda")

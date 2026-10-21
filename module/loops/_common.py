@@ -19,6 +19,17 @@ def collect_oom_kwargs(args):
     return oom_kwargs
 
 
+def model_max_memory(args):
+    """``max_memory`` for ``--max-gpu-memory-gb``: cap each GPU, offload the rest to RAM."""
+    if getattr(args, "max_gpu_memory_gb", None) is None:
+        return None
+    import torch
+
+    max_memory = {i: f"{args.max_gpu_memory_gb}GiB" for i in range(torch.cuda.device_count())}
+    max_memory["cpu"] = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_AVPHYS_PAGES")
+    return max_memory
+
+
 def derive_pygame_ui_video_path(output_video_path):
     """Return the companion video path for recorded Pygame UI frames."""
     root, ext = os.path.splitext(output_video_path)

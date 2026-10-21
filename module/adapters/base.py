@@ -48,8 +48,13 @@ class AlpamayoAdapter(ABC):
         device_map: str | None = "auto",
         oom_free: bool = False,
         oom_kwargs: dict[str, Any] | None = None,
+        max_memory: dict[int | str, Any] | None = None,
     ) -> tuple[Any, Any]:
-        """Load and return ``(model, processor)`` for this release."""
+        """Load and return ``(model, processor)`` for this release.
+
+        ``max_memory`` caps each device for ``device_map`` placement; layers that do
+        not fit on the GPU are offloaded to CPU RAM by accelerate (slow but fits).
+        """
 
     @abstractmethod
     def prepare_model_input(

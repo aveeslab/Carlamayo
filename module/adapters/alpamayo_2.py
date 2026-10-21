@@ -33,6 +33,7 @@ class Alpamayo2Adapter(AlpamayoAdapter):
 
     def load_model(
         self, use_quantization=False, device_map="auto", oom_free=False, oom_kwargs=None,
+        max_memory=None,
     ):
         if oom_free:
             raise ValueError("OOM-free demand layering is not supported for Alpamayo 2.")
@@ -53,11 +54,12 @@ class Alpamayo2Adapter(AlpamayoAdapter):
                 self.model_id,
                 quantization_config=quantization_config,
                 device_map=device_map,
+                max_memory=max_memory,
                 torch_dtype=torch.bfloat16,
             )
         elif device_map:
             model = Alpamayo2Super.from_pretrained(
-                self.model_id, dtype=torch.bfloat16, device_map=device_map
+                self.model_id, dtype=torch.bfloat16, device_map=device_map, max_memory=max_memory
             )
         else:
             model = Alpamayo2Super.from_pretrained(self.model_id, dtype=torch.bfloat16).to("cuda")

@@ -70,6 +70,8 @@ python carlamayo.py --loop closed --version 2
 
 > Full-precision Alpamayo 2 needs ~70 GB VRAM. Run the CARLA server on a second
 > GPU (`-graphicsadapter=1`) when one GPU cannot host both.
+> On a single smaller GPU, `--max-gpu-memory-gb <GB>` keeps that much of the model on
+> each GPU and offloads the rest to CPU RAM; inference becomes much slower.
 
 Optional pygame UI (starts paused so you can enter navigation/VQA text first):
 

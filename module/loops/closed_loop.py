@@ -28,6 +28,7 @@ from module.inference import (
 from module.loops._common import (
     collect_oom_kwargs,
     derive_pygame_ui_video_path,
+    model_max_memory,
     stack_frame_buffer,
 )
 from module.navigation_control import NavigationControlState
@@ -123,7 +124,8 @@ def run(adapter, args):
     model = processor = None
     if not args.oom_free:
         model, processor = adapter.load_model(
-            use_quantization=args.quantization, device_map=args.device_map
+            use_quantization=args.quantization, device_map=args.device_map,
+            max_memory=model_max_memory(args),
         )
         print("Model loaded!")
         print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")

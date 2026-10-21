@@ -20,7 +20,7 @@ from module.inference import (
     configure_cuda_linalg_library,
     extract_trajectory_samples,
 )
-from module.loops._common import collect_oom_kwargs
+from module.loops._common import collect_oom_kwargs, model_max_memory
 from module.open_loop_dataset import (
     load_front_camera_image,
     load_open_loop_arrays,
@@ -40,6 +40,7 @@ def _load_model(adapter, args):
         device_map=args.device_map,
         oom_free=args.oom_free,
         oom_kwargs=collect_oom_kwargs(args),
+        max_memory=model_max_memory(args),
     )
 
 

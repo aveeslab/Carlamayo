@@ -60,6 +60,9 @@ def build_parser(preset_loop=None):
                         help="OOM-free: force this many GPU-resident VLM layers.")
     parser.add_argument("--device-map", default="auto",
                         help='Model device_map passed to from_pretrained.')
+    parser.add_argument("--max-gpu-memory-gb", type=float, default=None,
+                        help="Cap model memory per GPU; layers that do not fit are offloaded "
+                             "to CPU RAM (slow). Use for Alpamayo 2 on a <80 GB GPU.")
     parser.add_argument("--cuda-linalg-library", choices=("default", "cusolver", "magma"),
                         default="magma", help="Preferred CUDA linalg backend.")
     parser.add_argument("--output-video", default=None,

@@ -27,7 +27,7 @@ from module.inference import (
     extract_trajectory_samples,
     select_trajectory_by_prev_similarity,
 )
-from module.loops._common import collect_oom_kwargs, stack_frame_buffer
+from module.loops._common import collect_oom_kwargs, model_max_memory, stack_frame_buffer
 from module.visualization import VideoRecorder, create_live_open_loop_visualization_frame
 from module.vlm_generate_optimization import VlmGenerateTiming
 
@@ -75,7 +75,8 @@ def run(adapter, args):
     model = processor = None
     if not args.oom_free:
         model, processor = adapter.load_model(
-            use_quantization=args.quantization, device_map=args.device_map
+            use_quantization=args.quantization, device_map=args.device_map,
+            max_memory=model_max_memory(args),
         )
         print("Model loaded!")
         print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")

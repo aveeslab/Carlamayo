@@ -40,3 +40,19 @@ def test_parsed_defaults_and_overrides():
     assert args.mode == "normal"
     assert args.device_map == "auto"
     assert args.output_video is None
+
+
+def test_max_gpu_memory_caps_each_gpu_and_offloads_the_rest_to_cpu(monkeypatch):
+    import torch
+
+    from module.loops._common import model_max_memory
+
+    parser = carlamayo.build_parser()
+    args = parser.parse_args(["--version", "2", "--loop", "open", "--max-gpu-memory-gb", "38"])
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+
+    max_memory = model_max_memory(args)
+
+    assert max_memory[0] == "38.0GiB"
+    assert max_memory["cpu"] > 0
+    assert model_max_memory(parser.parse_args(["--version", "2", "--loop", "open"])) is None

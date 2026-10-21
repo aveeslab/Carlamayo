@@ -126,7 +126,8 @@ config.attn_implementation = "sdpa"
 If you encounter OOM errors:
 
 1. Use **OOM-free mode** (`--oom-free`, Alpamayo 1.5 only). See [OOM-Free Mode](docs/oom-free-mode.md).
-2. Try 4-bit quantization with `--quantization`.
+2. Try 4-bit quantization with `--quantization`, or keep full precision and offload the
+   layers that do not fit to CPU RAM with `--max-gpu-memory-gb <GB>` (much slower).
 3. Run the CARLA server on a different GPU than the model.
 4. Ensure enough VRAM for the selected version and precision.
 5. Close other GPU-intensive applications.
