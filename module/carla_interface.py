@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from . import config as cfg
+from .adapters._rigs import BODY_CLEARANCE_CAMERAS
 from .data_collection import collect_synchronous_sensor_frame
 from .open_loop_dataset import build_ego_history
 
@@ -24,6 +25,24 @@ def is_allowed_npc_vehicle_blueprint(blueprint):
 
     blueprint_id = getattr(blueprint, "id", "").lower()
     return not any(keyword in blueprint_id for keyword in cfg.NPC_EXCLUDED_VEHICLE_KEYWORDS)
+
+
+def camera_transforms(vehicle, camera_configs):
+    """Actor-frame transforms for a rear-axle-relative camera rig (``module.adapters._rigs``).
+
+    Forward-center cameras are raised just above the vehicle bounding box when their
+    calibrated pose would sit inside the roof or windshield.
+    """
+    bbox = vehicle.bounding_box
+    roof_z = bbox.location.z + bbox.extent.z + cfg.CAMERA_BODY_CLEARANCE_M
+    transforms = {}
+    for name, cam in camera_configs.items():
+        z = max(cam["z"], roof_z) if name in BODY_CLEARANCE_CAMERAS else cam["z"]
+        transforms[name] = carla.Transform(
+            carla.Location(x=cfg.EGO_REAR_AXLE_X + cam["x"], y=cam["y"], z=z),
+            carla.Rotation(pitch=cam["pitch"], yaw=cam["yaw"], roll=cam["roll"]),
+        )
+    return transforms
 
 
 class CARLAInterface:
@@ -189,7 +208,7 @@ class CARLAInterface:
 
     def spawn_ego_vehicle(self):
         bp_lib = self.world.get_blueprint_library()
-        vehicle_bp = bp_lib.find("vehicle.tesla.model3")
+        vehicle_bp = bp_lib.find("vehicle.lincoln.mkz_2020")
         vehicle_bp.set_attribute("role_name", "hero")
         spawn_point = self._select_ego_spawn_point()
         print("Spawning ego vehicle...")
@@ -219,6 +238,7 @@ class CARLAInterface:
     def setup_cameras(self):
         print("Setting up cameras...")
         bp_lib = self.world.get_blueprint_library()
+        transforms = camera_transforms(self.ego_vehicle, self.camera_configs)
         for name, cfg_cam in self.camera_configs.items():
             print(f"  - spawning {name}")
             cam_bp = bp_lib.find("sensor.camera.rgb")
@@ -228,11 +248,7 @@ class CARLAInterface:
             cam_bp.set_attribute("enable_postprocess_effects", str(cfg.CAMERA_ENABLE_POSTPROCESS_EFFECTS))
             cam_bp.set_attribute("sensor_tick", "0.0")
 
-            transform = carla.Transform(
-                carla.Location(x=cfg_cam["x"], y=cfg_cam["y"], z=cfg_cam["z"]),
-                carla.Rotation(pitch=cfg_cam["pitch"], yaw=cfg_cam["yaw"]),
-            )
-            sensor = self.world.spawn_actor(cam_bp, transform, attach_to=self.ego_vehicle)
+            sensor = self.world.spawn_actor(cam_bp, transforms[name], attach_to=self.ego_vehicle)
             sensor.listen(lambda data, n=name: self.sensor_queue.put((data.frame, n, data)))
             self.sensors[name] = sensor
             time.sleep(0.2)
@@ -318,8 +334,6 @@ class CARLAInterface:
         if not self.history_buffer:
             self.history_buffer.append(self.get_ego_state())
         poses = {str(i): state for i, state in enumerate(self.history_buffer)}
-        # ponytail: origin is the actor pivot, not Alpamayo's rear axle; shift history
-        # and predicted waypoints together if that offset ever matters.
         return build_ego_history(
             poses, list(range(len(poses))), len(poses) - 1, num_history_steps=cfg.NUM_HISTORY
         )

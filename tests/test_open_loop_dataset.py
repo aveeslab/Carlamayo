@@ -3,6 +3,7 @@ import json
 import numpy as np
 from PIL import Image
 
+from module import config as cfg
 from module.open_loop_dataset import (
     OPEN_LOOP_CAMERA_ORDER,
     _pose_to_position_and_rotation,
@@ -37,10 +38,13 @@ def test_pose_conversion_is_carla_pose_mirrored_into_flu():
         )
         expected = mirror @ _carla_rotation_matrix(roll, pitch, yaw) @ mirror
         np.testing.assert_allclose(rotation.as_matrix(), expected, atol=1e-6)
-        np.testing.assert_allclose(position, [1.0, -2.0, 3.0])
+        # The origin moves from the actor pivot to the rear axle along the actor x axis.
+        rear_axle = mirror @ [1.0, 2.0, 3.0] + expected @ [cfg.EGO_REAR_AXLE_X, 0.0, 0.0]
+        np.testing.assert_allclose(position, rear_axle, atol=1e-5)
 
 
-def test_build_ego_history_is_in_alpamayo_flu_frame():
+def test_build_ego_history_is_in_alpamayo_flu_frame(monkeypatch):
+    monkeypatch.setattr(cfg, "EGO_REAR_AXLE_X", 0.0)
     # Heading CARLA yaw=90 after driving 10 m: the previous pose is 10 m behind.
     history_xyz, _ = build_ego_history(
         {"1": _pose(y=-10.0, yaw=90.0), "2": _pose(yaw=90.0)}, [1, 2], 1, num_history_steps=2

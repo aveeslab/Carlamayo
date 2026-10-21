@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from module.adapters._rigs import SEVEN_CAMERA_RIG
+from module.carla_interface import camera_transforms
 from module.data_collection import (
     collect_synchronous_sensor_frame,
     frame_file_path,
@@ -156,7 +157,7 @@ def main():
 
         # Ego Vehicle
         spawn_points = world.get_map().get_spawn_points()
-        vehicle_bp = bp_lib.find("vehicle.tesla.model3")
+        vehicle_bp = bp_lib.find("vehicle.lincoln.mkz_2020")
         vehicle_bp.set_attribute("role_name", "hero")
 
         ego_vehicle = None
@@ -176,6 +177,7 @@ def main():
         # Sensors
         sensor_queue = queue.Queue()
 
+        transforms = camera_transforms(ego_vehicle, SENSOR_CONFIGS)
         for name, cfg in SENSOR_CONFIGS.items():
             cam_bp = bp_lib.find("sensor.camera.rgb")
             cam_bp.set_attribute("image_size_x", str(IMAGE_WIDTH))
@@ -183,12 +185,7 @@ def main():
             cam_bp.set_attribute("fov", str(cfg["fov"]))
             cam_bp.set_attribute("sensor_tick", "0.0")
 
-            transform = carla.Transform(
-                carla.Location(x=cfg["x"], y=cfg["y"], z=cfg["z"]),
-                carla.Rotation(pitch=cfg["pitch"], yaw=cfg["yaw"]),
-            )
-
-            sensor = world.spawn_actor(cam_bp, transform, attach_to=ego_vehicle)
+            sensor = world.spawn_actor(cam_bp, transforms[name], attach_to=ego_vehicle)
             sensor.listen(lambda data, n=name: sensor_callback(data, sensor_queue, n))
             actor_list.append(sensor)
             sensor_list.append(sensor)

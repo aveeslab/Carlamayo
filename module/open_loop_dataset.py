@@ -36,19 +36,22 @@ def load_trajectory_index(data_root):
 
 
 def _pose_to_position_and_rotation(pose):
-    """Convert a CARLA pose to Alpamayo's right-handed FLU frame (x fwd, y left, z up).
+    """Convert a CARLA actor pose to Alpamayo's rear-axle pose in FLU (x fwd, y left, z up).
 
     CARLA is left-handed (y right) and its rotation matrix is
     ``Rz(yaw) @ Ry(-pitch) @ Rx(-roll)``. Mirroring y turns that into
-    ``Rz(-yaw) @ Ry(-pitch) @ Rx(roll)``.
+    ``Rz(-yaw) @ Ry(-pitch) @ Rx(roll)``. Alpamayo's ego origin is the rear axle,
+    ``cfg.EGO_REAR_AXLE_X`` along the actor's x axis.
     """
-    position = np.array([pose["x"], -pose["y"], pose["z"]], dtype=np.float32)
     rotation = R.from_euler(
         "xyz",
         [pose["roll"], -pose["pitch"], -pose["yaw"]],
         degrees=True,
     )
-    return position, rotation
+    position = np.array([pose["x"], -pose["y"], pose["z"]]) + rotation.apply(
+        [cfg.EGO_REAR_AXLE_X, 0.0, 0.0]
+    )
+    return position.astype(np.float32), rotation
 
 
 def build_ego_history(trajectory, frame_ids, t0_index, num_history_steps=cfg.NUM_HISTORY):

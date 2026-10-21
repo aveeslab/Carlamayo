@@ -9,6 +9,11 @@ import cv2
 import numpy as np
 import torch
 
+from module.adapters._rigs import SEVEN_CAMERA_RIG
+
+# Trajectories are rear-axle relative, like the calibrated rig.
+_FRONT_WIDE_CAMERA = SEVEN_CAMERA_RIG["camera_front_wide_120fov"]
+
 
 def _project_one_trajectory(
     result,
@@ -16,12 +21,13 @@ def _project_one_trajectory(
     img_width,
     img_height,
     focal_length_px,
+    camera_x,
     camera_height,
     line_color,
     point_color,
     line_thickness,
 ):
-    x, y, z = points_3d[:, 0], points_3d[:, 1], points_3d[:, 2]
+    x, y, z = points_3d[:, 0] - camera_x, points_3d[:, 1], points_3d[:, 2]
     z_cam = z + camera_height
     valid = x > 0.5
 
@@ -49,7 +55,14 @@ def _project_one_trajectory(
         cv2.circle(result, tuple(pt), max(4, line_thickness), point_color, -1, cv2.LINE_AA)
 
 
-def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, camera_height=2.4, fov=120):
+def project_trajectory_to_image(
+    cam_img,
+    pred_xyz,
+    selected_idx=0,
+    camera_x=_FRONT_WIDE_CAMERA["x"],
+    camera_height=_FRONT_WIDE_CAMERA["z"],
+    fov=_FRONT_WIDE_CAMERA["fov"],
+):
     """Project one or multiple trajectories onto image."""
     img_height, img_width = cam_img.shape[:2]
     focal_length_px = img_width / (2 * np.tan(np.radians(fov / 2)))
@@ -79,6 +92,7 @@ def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, camera_height
             img_width=img_width,
             img_height=img_height,
             focal_length_px=focal_length_px,
+            camera_x=camera_x,
             camera_height=camera_height,
             line_color=(255, 255, 255),
             point_color=(255, 255, 255),
@@ -91,6 +105,7 @@ def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, camera_height
         img_width=img_width,
         img_height=img_height,
         focal_length_px=focal_length_px,
+        camera_x=camera_x,
         camera_height=camera_height,
         line_color=(255, 0, 0),
         point_color=(255, 100, 100),

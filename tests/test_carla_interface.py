@@ -46,6 +46,32 @@ def test_get_camera_images_raises_when_camera_frame_missing():
         carla_if.get_camera_images(frame_id=8, timeout=0.1)
 
 
+def test_camera_transforms_mount_calibrated_rig_on_the_rear_axle(monkeypatch):
+    from module.adapters._rigs import FOUR_CAMERA_RIG
+
+    monkeypatch.setattr(carla_interface, "carla", types.SimpleNamespace(
+        Transform=lambda location, rotation: types.SimpleNamespace(
+            location=location, rotation=rotation
+        ),
+        Location=types.SimpleNamespace,
+        Rotation=types.SimpleNamespace,
+    ))
+    vehicle = types.SimpleNamespace(bounding_box=types.SimpleNamespace(
+        location=types.SimpleNamespace(z=0.75), extent=types.SimpleNamespace(z=0.75)
+    ))
+
+    transforms = carla_interface.camera_transforms(vehicle, FOUR_CAMERA_RIG)
+
+    cross_left = transforms["camera_cross_left_120fov"]
+    assert cross_left.location.y < 0 and cross_left.rotation.yaw < 0  # left in CARLA
+    assert cross_left.location.x == pytest.approx(
+        carla_interface.cfg.EGO_REAR_AXLE_X + FOUR_CAMERA_RIG["camera_cross_left_120fov"]["x"]
+    )
+    roof_z = 1.5 + carla_interface.cfg.CAMERA_BODY_CLEARANCE_M
+    assert transforms["camera_front_wide_120fov"].location.z == pytest.approx(roof_z)
+    assert cross_left.location.z == pytest.approx(FOUR_CAMERA_RIG["camera_cross_left_120fov"]["z"])
+
+
 def test_closed_loop_history_uses_alpamayo_y_left():
     carla_if = CARLAInterface()
     pose = {"x": 0.0, "y": 0.0, "z": 0.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0}

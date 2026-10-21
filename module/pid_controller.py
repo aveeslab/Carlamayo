@@ -120,7 +120,8 @@ class OfficialPIDFollower:
 
     def compute_control(self, vehicle_tf, wp_ego, speed_mps):
         wp_local = alpamayo_to_carla_local(wp_ego)
-        wp_world = local_to_world(vehicle_tf, wp_local)
+        # Alpamayo waypoints start at the rear axle; CARLA transforms use the actor origin.
+        wp_world = local_to_world(vehicle_tf, wp_local + [cfg.EGO_REAR_AXLE_X, 0.0, 0.0])
         traj_extent = float(np.max(np.linalg.norm(wp_local[:, :2], axis=1)))
         target_speed_kmh = float(
             np.clip(

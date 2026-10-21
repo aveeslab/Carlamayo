@@ -3,6 +3,7 @@ import types
 import numpy as np
 import pytest
 
+from module import config as cfg
 from module import pid_controller
 
 
@@ -107,8 +108,9 @@ def test_pid_follower_uses_raw_target_without_carla_waypoint_projection(monkeypa
     assert fake_map.called is False
     assert (steer, throttle, brake) == pytest.approx((0.1, 0.2, 0.0))
     target_loc = follower.pid.last_waypoint.transform.location
-    assert target_loc.x == pytest.approx(15.0)
+    # Waypoints are rear-axle relative; the actor origin sits EGO_REAR_AXLE_X ahead.
+    assert target_loc.x == pytest.approx(15.0 + cfg.EGO_REAR_AXLE_X)
     assert target_loc.y == pytest.approx(20.0)
     assert debug["target_idx"] == 1
-    assert debug["target_raw_xy"] == pytest.approx([15.0, 20.0])
+    assert debug["target_raw_xy"] == pytest.approx([15.0 + cfg.EGO_REAR_AXLE_X, 20.0])
     assert debug["target_projected_to_road"] is False

@@ -40,6 +40,13 @@ NPC_EXCLUDED_VEHICLE_KEYWORDS = (
     "sprinter",
 )
 
+# Ego vehicle (vehicle.lincoln.mkz_2020). Alpamayo's ego frame and the calibrated
+# camera rig are anchored at the rear axle; this is its x offset from the CARLA
+# actor origin, measured on CARLA 0.9.16.
+EGO_REAR_AXLE_X = -1.3886
+# Forward-center cameras are raised this far above the ego bounding box.
+CAMERA_BODY_CLEARANCE_M = 0.08
+
 # Control config
 CONTROL_DT = 0.1
 THROTTLE_MAX = 0.6

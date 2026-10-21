@@ -26,7 +26,8 @@ def test_project_trajectory_to_image_draws_selected_path_in_red():
 
 def test_project_trajectory_to_image_accepts_torch_tensor():
     image = np.zeros((80, 120, 3), dtype=np.uint8)
-    trajectory = torch.tensor([[[2.0, 0.0, 0.0], [6.0, 0.0, 0.0]]], dtype=torch.float32)
+    # Rear-axle relative: both points lie ahead of the front camera.
+    trajectory = torch.tensor([[[4.0, 0.0, 0.0], [8.0, 0.0, 0.0]]], dtype=torch.float32)
 
     rendered = project_trajectory_to_image(image, trajectory)
 
