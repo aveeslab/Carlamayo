@@ -36,10 +36,16 @@ def load_trajectory_index(data_root):
 
 
 def _pose_to_position_and_rotation(pose):
-    position = np.array([pose["x"], pose["y"], pose["z"]], dtype=np.float32)
+    """Convert a CARLA pose to Alpamayo's right-handed FLU frame (x fwd, y left, z up).
+
+    CARLA is left-handed (y right) and its rotation matrix is
+    ``Rz(yaw) @ Ry(-pitch) @ Rx(-roll)``. Mirroring y turns that into
+    ``Rz(-yaw) @ Ry(-pitch) @ Rx(roll)``.
+    """
+    position = np.array([pose["x"], -pose["y"], pose["z"]], dtype=np.float32)
     rotation = R.from_euler(
         "xyz",
-        [pose["roll"], pose["pitch"], -pose["yaw"]],
+        [pose["roll"], -pose["pitch"], -pose["yaw"]],
         degrees=True,
     )
     return position, rotation

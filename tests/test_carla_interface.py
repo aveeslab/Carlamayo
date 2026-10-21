@@ -30,6 +30,17 @@ def test_get_camera_images_raises_when_camera_frame_missing():
         carla_if.get_camera_images()
 
 
+def test_closed_loop_history_uses_alpamayo_y_left():
+    carla_if = CARLAInterface()
+    pose = {"x": 0.0, "y": 0.0, "z": 0.0, "roll": 0.0, "pitch": 0.0, "yaw": 0.0}
+    carla_if.history_buffer = [{**pose, "y": -3.0}, pose]
+
+    history_xyz, _history_rot = carla_if.get_history_in_local_frame()
+
+    assert history_xyz[0][1] == pytest.approx(3.0)
+    assert history_xyz[-1].tolist() == [0.0, 0.0, 0.0]
+
+
 def test_cleanup_reports_recoverable_teardown_failures(capsys):
     class FailingTrafficManager:
         def set_synchronous_mode(self, _enabled):

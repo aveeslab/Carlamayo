@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from . import config as cfg
+from .open_loop_dataset import build_ego_history
 
 
 def is_allowed_npc_vehicle_blueprint(blueprint):
@@ -320,29 +321,15 @@ class CARLAInterface:
             self.history_buffer.pop(0)
 
     def get_history_in_local_frame(self):
-        if len(self.history_buffer) < cfg.NUM_HISTORY:
-            while len(self.history_buffer) < cfg.NUM_HISTORY:
-                self.history_buffer.insert(0, self.history_buffer[0] if self.history_buffer else self.get_ego_state())
-
-        current = self.history_buffer[-1]
-        current_pos = np.array([current["x"], current["y"], current["z"]])
-        yaw_rad = math.radians(-current["yaw"])
-        cos_yaw, sin_yaw = math.cos(yaw_rad), math.sin(yaw_rad)
-        rot_matrix = np.array([[cos_yaw, -sin_yaw, 0], [sin_yaw, cos_yaw, 0], [0, 0, 1]])
-
-        history_xyz = np.zeros((cfg.NUM_HISTORY, 3), dtype=np.float32)
-        history_rot = np.zeros((cfg.NUM_HISTORY, 3, 3), dtype=np.float32)
-
-        for i, st in enumerate(self.history_buffer):
-            pos = np.array([st["x"], st["y"], st["z"]])
-            history_xyz[i] = rot_matrix @ (pos - current_pos)
-            state_yaw = math.radians(-st["yaw"])
-            rel_yaw = state_yaw - yaw_rad
-            history_rot[i] = np.array(
-                [[math.cos(rel_yaw), -math.sin(rel_yaw), 0], [math.sin(rel_yaw), math.cos(rel_yaw), 0], [0, 0, 1]]
-            )
-
-        return history_xyz, history_rot
+        """Ego history in Alpamayo's FLU frame, sharing the open-loop conversion."""
+        if not self.history_buffer:
+            self.history_buffer.append(self.get_ego_state())
+        poses = {str(i): state for i, state in enumerate(self.history_buffer)}
+        # ponytail: origin is the actor pivot, not Alpamayo's rear axle; shift history
+        # and predicted waypoints together if that offset ever matters.
+        return build_ego_history(
+            poses, list(range(len(poses))), len(poses) - 1, num_history_steps=cfg.NUM_HISTORY
+        )
 
     def apply_control(self, steering, throttle, brake):
         control = carla.VehicleControl()
