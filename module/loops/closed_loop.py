@@ -242,6 +242,8 @@ def run(adapter, args):
 
         def _run_inference_with_nav_fallback(model_data, navigation_text, navigation_weight):
             def _run_once():
+                torch.manual_seed(cfg.INFERENCE_SEED)
+                torch.cuda.manual_seed_all(cfg.INFERENCE_SEED)
                 return adapter.run_inference(
                     model, processor, model_data,
                     navigation_text=navigation_text,

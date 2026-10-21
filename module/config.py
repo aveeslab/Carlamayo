@@ -17,6 +17,10 @@ CAMERA_ENABLE_POSTPROCESS_EFFECTS = True
 NUM_HISTORY = 16
 NUM_FRAMES = 4
 NUM_TRAJ_SAMPLES = 1
+# Seed set before every trajectory inference. Alpamayo samples its CoT (temperature
+# 0.6) and diffusion noise; reusing one seed keeps consecutive plans comparable
+# instead of jumping by several metres between 0.1 s ticks.
+INFERENCE_SEED = 42
 
 # Video Configuration
 SAVE_VIDEO = True

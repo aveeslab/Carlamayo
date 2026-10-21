@@ -87,7 +87,8 @@ def run(adapter, args):
         model_input = adapter.prepare_model_input(
             arrays["image_frames"], arrays["history_xyz"], arrays["history_rot"], arrays["t0_us"]
         )
-        torch.cuda.manual_seed_all(42)
+        torch.manual_seed(cfg.INFERENCE_SEED)
+        torch.cuda.manual_seed_all(cfg.INFERENCE_SEED)
         inference_start = time.perf_counter()
         pred_xyz, extra = adapter.run_inference(model, processor, model_input)
         inference_time = time.perf_counter() - inference_start
