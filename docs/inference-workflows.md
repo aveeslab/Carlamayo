@@ -51,13 +51,11 @@ Output: `carla_alpamayo_open_loop_result.mp4`
 
 ## 3. Closed-Loop Inference
 
-The model drives the ego vehicle via a PID follower. Start CARLA and set the
-PythonAPI path if needed:
+The model drives the ego vehicle via a trajectory follower. Start CARLA:
 
 ```bash
 cd ~/carla
 ./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
-export CARLA_ROOT=~/carla
 ```
 
 The CARLA town/map is set in `module/config.py` (`CARLA_MAP`). Run:
@@ -104,7 +102,6 @@ live simulation.
 ```bash
 cd ~/carla
 ./CarlaUE4.sh -RenderOffScreen -quality-level=Epic
-export CARLA_ROOT=~/carla
 
 source a2_carla_venv/bin/activate
 # --async keeps the sim moving in real time while inference runs in the background:

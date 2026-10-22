@@ -32,7 +32,7 @@ from module.loops._common import (
     stack_frame_buffer,
 )
 from module.navigation_control import NavigationControlState
-from module.pid_controller import OfficialPIDFollower, planned_speeds, trajectory_to_world
+from module.trajectory_follower import TrajectoryFollower, planned_speeds, trajectory_to_world
 from module.respawn_control import RespawnMonitor
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.vlm_generate_optimization import VlmGenerateTiming
@@ -180,7 +180,7 @@ def run(adapter, args):
             print("Model loaded!")
             print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
-        pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
+        follower = TrajectoryFollower(carla_if.ego_vehicle)
 
         current_trajectory = None
         current_trajectory_world = None
@@ -216,12 +216,12 @@ def run(adapter, args):
         def _auto_respawn(reason):
             nonlocal current_trajectory, current_pred_xyz, prev_selected_trajectory
             nonlocal current_selected_traj_idx, current_cot, current_inference_time
-            nonlocal current_trajectory_frame, prev_control, pending_inference, pid_follower
+            nonlocal current_trajectory_frame, prev_control, pending_inference, follower
             nonlocal respawn_revision, last_vqa_submitted_revision, last_vqa_completed_revision
 
             print(f"[Frame {frame_count}] Auto-respawn: {reason}")
             carla_if.respawn_ego_vehicle()
-            pid_follower = OfficialPIDFollower(carla_if.world, carla_if.ego_vehicle)
+            follower = TrajectoryFollower(carla_if.ego_vehicle)
             current_trajectory = None
             current_pred_xyz = None
             prev_selected_trajectory = None
@@ -648,26 +648,16 @@ def run(adapter, args):
             )
             if current_trajectory is not None and trajectory_age <= cfg.TRAJECTORY_MAX_AGE_SEC:
                 vehicle_tf = carla_if.ego_vehicle.get_transform()
-                steering_raw, throttle_raw, brake_raw, ctrl_debug = pid_follower.compute_control(
+                steering, throttle, brake, ctrl_debug = follower.compute_control(
                     vehicle_tf, current_trajectory_world, float(state["speed"]),
                     current_speeds, trajectory_age,
                 )
-                alpha = cfg.CONTROL_SMOOTH_ALPHA
-                steering = (1.0 - alpha) * prev_control["steer"] + alpha * steering_raw
-                throttle = (1.0 - alpha) * prev_control["throttle"] + alpha * throttle_raw
-                brake = (1.0 - alpha) * prev_control["brake"] + alpha * brake_raw
-                # Keep both smoothed pedals as state and apply only the stronger one, so
-                # throttle builds up while a previous brake is still decaying.
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
-                if throttle >= brake:
-                    brake = 0.0
-                else:
-                    throttle = 0.0
                 carla_if.apply_control(steering, throttle, brake)
                 control_record = {
                     "target_speed_kmh": ctrl_debug.get("target_speed_kmh"),
                     "planned_stop": ctrl_debug.get("planned_stop"),
-                    "control_raw": [steering_raw, throttle_raw, brake_raw],
+                    "launch": ctrl_debug.get("launch"),
                     "control_applied": [steering, throttle, brake],
                 }
 

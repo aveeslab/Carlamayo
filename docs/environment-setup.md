@@ -130,11 +130,3 @@ python -m pip install --no-deps -e third_party/alpamayo1 -e third_party/alpamayo
 python -m pip install --no-deps -e third_party/oom-free-alpamayo  # optional: --oom-free (1.5)
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
-
-If `agents.navigation.controller` is not found, set `CARLA_ROOT` to the directory that contains `PythonAPI/carla`:
-
-```bash
-export CARLA_ROOT=~/carla
-```
-
-Alternatively, edit `CARLA_AGENT_ROOT` in `module/config.py`.

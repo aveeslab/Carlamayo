@@ -15,12 +15,6 @@ cd ~/carla
 
 > Do not add `-quality-level=Low`; low-quality rendering can degrade camera inputs.
 
-Set the CARLA PythonAPI root if it is not already configured:
-
-```bash
-export CARLA_ROOT=~/carla
-```
-
 ## Run Navigation Mode
 
 From the repository root:
