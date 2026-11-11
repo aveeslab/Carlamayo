@@ -10,3 +10,6 @@
 [submodule "third_party/alpamayo2"]
 	path = third_party/alpamayo2
 	url = https://github.com/NVlabs/alpamayo2.git
+[submodule "third_party/alpamayo2-edge"]
+	path = third_party/alpamayo2-edge
+	url = https://github.com/NVlabs/alpamayo2-edge.git
