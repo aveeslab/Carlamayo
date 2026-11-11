@@ -88,6 +88,8 @@ def run(adapter, args):
     inference_interval_sec = 1.0
     viz_slot = adapter.viz_camera_slot
     num_cameras = adapter.num_cameras
+    # Ticks of camera frames kept so the oldest frame the model consumes is available.
+    frame_window = max(adapter.frame_ticks) + 1
     output_video = args.output_video or cfg.OUTPUT_VIDEO
     start_paused = bool(args.pygame_ui)
     pygame_ui_video = derive_pygame_ui_video_path(output_video) if args.pygame_ui else None
@@ -134,7 +136,9 @@ def run(adapter, args):
         # reflects the VRAM CARLA actually leaves free.
         print("OOM-free mode: Alpamayo loads after CARLA is fully spawned.")
 
-    carla_if = CARLAInterface(camera_configs=adapter.source_camera_configs)
+    carla_if = CARLAInterface(
+        camera_configs=adapter.source_camera_configs, history_steps=adapter.num_history_steps
+    )
     video_recorder = VideoRecorder(output_video, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
     pygame_ui = None
     pygame_ui_recorder = None
@@ -286,7 +290,7 @@ def run(adapter, args):
             inference_stop = threading.Event()
 
             def _build_inference_request():
-                images_array = stack_frame_buffer(frame_buffer, num_cameras)
+                images_array = stack_frame_buffer(frame_buffer, adapter.frame_ticks)
                 history_xyz, history_rot = carla_if.get_history_in_local_frame()
                 return {
                     "mode": args.mode,
@@ -442,6 +446,8 @@ def run(adapter, args):
                 images = carla_if.get_camera_images()
             except TimeoutError as exc:
                 print(f"[Frame {frame_count}] Warning: {exc}; braking and skipping this tick.")
+                # A missing tick would shift every buffered frame against frame_ticks.
+                frame_buffer.clear()
                 carla_if.apply_control(0.0, 0.0, 1.0)
                 prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
                 latest_telemetry = {
@@ -462,7 +468,7 @@ def run(adapter, args):
                 "inference_time": current_inference_time,
             }
             frame_buffer.append(images)
-            if len(frame_buffer) > cfg.NUM_FRAMES:
+            if len(frame_buffer) > frame_window:
                 frame_buffer.pop(0)
             if run_recorder is not None:
                 run_recorder.add_frame(carla_if.frame_id, images, state)
@@ -472,7 +478,7 @@ def run(adapter, args):
                 now_ts = time.time()
                 if args.mode == "vqa":
                     should_submit_inference = (
-                        len(frame_buffer) >= cfg.NUM_FRAMES
+                        len(frame_buffer) >= frame_window
                         and bool(nav_state.vqa_question)
                         and not pending_inference
                         and nav_state.revision != last_vqa_submitted_revision
@@ -480,7 +486,7 @@ def run(adapter, args):
                     )
                 else:
                     should_submit_inference = (
-                        len(frame_buffer) >= cfg.NUM_FRAMES
+                        len(frame_buffer) >= frame_window
                         and not pending_inference
                         and (now_ts - last_inference_submit_ts) >= inference_interval_sec
                     )
@@ -571,8 +577,8 @@ def run(adapter, args):
                         if args.debug_worker_traceback and latest_result.get("traceback"):
                             print(latest_result["traceback"].rstrip())
             else:
-                if len(frame_buffer) >= cfg.NUM_FRAMES:
-                    images_array = stack_frame_buffer(frame_buffer, num_cameras)
+                if len(frame_buffer) >= frame_window:
+                    images_array = stack_frame_buffer(frame_buffer, adapter.frame_ticks)
                     history_xyz, history_rot = carla_if.get_history_in_local_frame()
                     model_data = adapter.prepare_model_input(
                         images_array, history_xyz, history_rot,

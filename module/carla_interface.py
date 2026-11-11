@@ -48,7 +48,7 @@ def camera_transforms(vehicle, camera_configs):
 class CARLAInterface:
     """Interface for CARLA simulation."""
 
-    def __init__(self, camera_configs=None):
+    def __init__(self, camera_configs=None, history_steps=cfg.NUM_HISTORY):
         self.client = None
         self.world = None
         self.ego_vehicle = None
@@ -58,6 +58,7 @@ class CARLAInterface:
         self.frame_id = None
         self.collision_events = []
         self.history_buffer = []
+        self.history_steps = history_steps
         self.npc_vehicle_ids = []
         self.npc_walker_ids = []
         self.npc_walker_controller_ids = []
@@ -326,7 +327,7 @@ class CARLAInterface:
 
     def update_history(self, state):
         self.history_buffer.append(state)
-        if len(self.history_buffer) > cfg.NUM_HISTORY:
+        if len(self.history_buffer) > self.history_steps:
             self.history_buffer.pop(0)
 
     def get_history_in_local_frame(self):
@@ -335,7 +336,7 @@ class CARLAInterface:
             self.history_buffer.append(self.get_ego_state())
         poses = {str(i): state for i, state in enumerate(self.history_buffer)}
         return build_ego_history(
-            poses, list(range(len(poses))), len(poses) - 1, num_history_steps=cfg.NUM_HISTORY
+            poses, list(range(len(poses))), len(poses) - 1, num_history_steps=self.history_steps
         )
 
     def get_nearby_actors(self, radius_m=40.0):

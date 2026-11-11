@@ -56,3 +56,17 @@ def test_max_gpu_memory_caps_each_gpu_and_offloads_the_rest_to_cpu(monkeypatch):
     assert max_memory[0] == "38.0GiB"
     assert max_memory["cpu"] > 0
     assert model_max_memory(parser.parse_args(["--version", "2", "--loop", "open"])) is None
+
+
+def test_stack_frame_buffer_picks_ticks_before_the_newest_frame():
+    import numpy as np
+
+    from module.loops._common import stack_frame_buffer
+
+    # Five ticks of a two-camera rig; pixel value = tick index, camera 1 offset by 100.
+    buffer = [np.array([np.full((2, 2, 3), t), np.full((2, 2, 3), 100 + t)]) for t in range(5)]
+
+    images = stack_frame_buffer(buffer, frame_ticks=(4, 1, 0))
+
+    assert images.shape == (2, 3, 2, 2, 3)
+    assert images[:, :, 0, 0, 0].tolist() == [[0, 3, 4], [100, 103, 104]]

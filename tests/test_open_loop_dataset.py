@@ -109,14 +109,14 @@ def test_load_open_loop_arrays_preserves_camera_and_frame_order(tmp_path):
             value = camera_index * 10 + frame_id
             _write_rgb_image(tmp_path / camera_name / f"{frame_id:06d}.jpg", value)
 
-    camera_history = load_camera_history(tmp_path, frame_ids, t0_index=1, num_frames=2)
+    camera_history = load_camera_history(tmp_path, frame_ids, t0_index=1, frame_ticks=(1, 0))
     sample = load_open_loop_arrays(
         tmp_path,
         trajectory,
         frame_ids,
         t0_index=1,
         num_history_steps=2,
-        num_frames=2,
+        frame_ticks=(1, 0),
     )
 
     assert camera_history.shape == (4, 2, 2, 3, 3)
@@ -128,3 +128,16 @@ def test_load_open_loop_arrays_preserves_camera_and_frame_order(tmp_path):
     assert sample["history_rot"].shape == (2, 3, 3)
     # The newest frame's clip-relative timestamp comes from the fixed control tick.
     assert sample["t0_us"] == 100_000
+
+
+def test_load_camera_history_picks_ticks_before_t0_and_clamps_at_the_start(tmp_path):
+    frame_ids = [10, 11, 12, 13]
+    for frame_id in frame_ids:
+        _write_rgb_image(tmp_path / "cam" / f"{frame_id:06d}.jpg", frame_id)
+
+    history = load_camera_history(
+        tmp_path, frame_ids, t0_index=3, camera_order=("cam",), frame_ticks=(5, 2, 0)
+    )
+
+    # 5 ticks back is before the first recorded frame and clamps to it.
+    assert history[0, :, 0, 0, 0].tolist() == [10, 11, 13]

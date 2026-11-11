@@ -61,7 +61,7 @@ def run(adapter, args):
     print(f"Cameras: {adapter.num_cameras} ({', '.join(camera_order)})")
 
     trajectory, frame_ids = load_trajectory_index(args.data_root)
-    start_index = cfg.NUM_FRAMES - 1
+    start_index = max(adapter.frame_ticks)
     frames_to_process = max(0, len(frame_ids) - start_index)
     print(f"\nTotal recorded frames: {len(frame_ids)}")
     print(f"Frames selected for inference: {frames_to_process}")
@@ -81,7 +81,7 @@ def run(adapter, args):
 
         arrays = load_open_loop_arrays(
             args.data_root, trajectory, frame_ids, frame_index,
-            num_history_steps=cfg.NUM_HISTORY, num_frames=cfg.NUM_FRAMES,
+            num_history_steps=adapter.num_history_steps, frame_ticks=adapter.frame_ticks,
             camera_order=camera_order,
         )
         model_input = adapter.prepare_model_input(

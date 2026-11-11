@@ -19,6 +19,8 @@ OPEN_LOOP_CAMERA_ORDER = (
     "camera_front_tele_30fov",
 )
 FRONT_CAMERA_NAME = "camera_front_wide_120fov"
+# Recorded frames before t0 to load, oldest first (consecutive ticks by default).
+DEFAULT_FRAME_TICKS = tuple(range(cfg.NUM_FRAMES - 1, -1, -1))
 
 
 def load_trajectory_index(data_root):
@@ -81,16 +83,16 @@ def load_camera_history(
     frame_ids,
     t0_index,
     camera_order=OPEN_LOOP_CAMERA_ORDER,
-    num_frames=cfg.NUM_FRAMES,
+    frame_ticks=DEFAULT_FRAME_TICKS,
 ):
-    """Load camera history as ``camera, time, height, width, channel`` arrays."""
+    """Load the frames ``frame_ticks`` before t0 as ``camera, time, height, width, channel``."""
 
     camera_frames = []
     for camera_name in camera_order:
         frames = []
         camera_dir = os.path.join(data_root, camera_name)
-        for offset in range(num_frames):
-            frame_index = max(0, t0_index - (num_frames - 1 - offset))
+        for tick in frame_ticks:
+            frame_index = max(0, t0_index - tick)
             frame_id = frame_ids[frame_index]
             image_path = os.path.join(camera_dir, f"{frame_id:06d}.jpg")
             image = Image.open(image_path).convert("RGB")
@@ -113,7 +115,7 @@ def load_open_loop_arrays(
     frame_ids,
     t0_index,
     num_history_steps=cfg.NUM_HISTORY,
-    num_frames=cfg.NUM_FRAMES,
+    frame_ticks=DEFAULT_FRAME_TICKS,
     camera_order=OPEN_LOOP_CAMERA_ORDER,
 ):
     """Load images and ego history arrays for one open-loop inference step."""
@@ -123,7 +125,7 @@ def load_open_loop_arrays(
         frame_ids,
         t0_index,
         camera_order=camera_order,
-        num_frames=num_frames,
+        frame_ticks=frame_ticks,
     )
     history_xyz, history_rot = build_ego_history(
         trajectory,

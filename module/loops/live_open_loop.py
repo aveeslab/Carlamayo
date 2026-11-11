@@ -51,6 +51,8 @@ def run(adapter, args):
     _check_capabilities(adapter, args)
     viz_slot = adapter.viz_camera_slot
     num_cameras = adapter.num_cameras
+    # Ticks of camera frames kept so the oldest frame the model consumes is available.
+    frame_window = max(adapter.frame_ticks) + 1
     output_video = args.output_video or cfg.LIVE_OPEN_LOOP_OUTPUT_VIDEO
     inference_interval_sec = 1.0
     nav_text = args.navigation_text if adapter.supports_navigation else ""
@@ -83,7 +85,9 @@ def run(adapter, args):
     else:
         print("OOM-free mode: Alpamayo loads after CARLA is fully spawned.")
 
-    carla_if = CARLAInterface(camera_configs=adapter.source_camera_configs)
+    carla_if = CARLAInterface(
+        camera_configs=adapter.source_camera_configs, history_steps=adapter.num_history_steps
+    )
     video_recorder = VideoRecorder(output_video, fps=cfg.VIDEO_FPS) if cfg.SAVE_VIDEO else None
     vlm_generate_timing = VlmGenerateTiming()
     run_recorder = None
@@ -235,23 +239,25 @@ def run(adapter, args):
                 images = carla_if.get_camera_images()
             except TimeoutError as exc:
                 print(f"[Frame {frame_count}] Warning: {exc}; skipping this tick.")
+                # A missing tick would shift every buffered frame against frame_ticks.
+                frame_buffer.clear()
                 continue
 
             frame_buffer.append(images)
-            if len(frame_buffer) > cfg.NUM_FRAMES:
+            if len(frame_buffer) > frame_window:
                 frame_buffer.pop(0)
             if run_recorder is not None:
                 run_recorder.add_frame(carla_if.frame_id, images, state)
             new_inference = None
 
-            if len(frame_buffer) >= cfg.NUM_FRAMES:
+            if len(frame_buffer) >= frame_window:
                 if args.async_mode:
                     now_ts = time.time()
                     due = (now_ts - last_inference_submit_ts) >= inference_interval_sec
                     if not pending_inference and due:
                         history_xyz, history_rot = carla_if.get_history_in_local_frame()
                         req = {
-                            "images_array": stack_frame_buffer(frame_buffer, num_cameras),
+                            "images_array": stack_frame_buffer(frame_buffer, adapter.frame_ticks),
                             "history_xyz": history_xyz,
                             "history_rot": history_rot,
                             "t0_us": int(frame_count * cfg.CONTROL_DT * 1_000_000),
@@ -288,7 +294,7 @@ def run(adapter, args):
                                 latest_result["history_rot"],
                             )
                 else:
-                    images_array = stack_frame_buffer(frame_buffer, num_cameras)
+                    images_array = stack_frame_buffer(frame_buffer, adapter.frame_ticks)
                     history_xyz, history_rot = carla_if.get_history_in_local_frame()
                     model_data = adapter.prepare_model_input(
                         images_array, history_xyz, history_rot,

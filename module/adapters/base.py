@@ -13,6 +13,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from .. import config as cfg
+
 
 class AlpamayoAdapter(ABC):
     """One Alpamayo release behind a stable CARLA-facing interface."""
@@ -31,6 +33,11 @@ class AlpamayoAdapter(ABC):
     source_camera_indices: tuple[int, ...] = ()
     #: Camera position (in the spawned rig) used for trajectory visualization.
     viz_camera_slot: int = 0
+    #: Simulation ticks (``cfg.CONTROL_DT`` apart) before t0 of the camera frames the
+    #: model consumes, oldest first; the frame axis of ``images_array`` follows it.
+    frame_ticks: tuple[int, ...] = tuple(range(cfg.NUM_FRAMES - 1, -1, -1))
+    #: Ego history poses ending at t0, ``cfg.CONTROL_DT`` apart.
+    num_history_steps: int = cfg.NUM_HISTORY
 
     #: Capability flags gate CLI modes so unsupported combinations fail early.
     supports_navigation: bool = False

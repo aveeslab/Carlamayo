@@ -4,8 +4,6 @@ import os
 
 import numpy as np
 
-from module import config as cfg
-
 
 def collect_oom_kwargs(args):
     """Gather the optional OOM-free tuning knobs set on the parsed args."""
@@ -36,13 +34,6 @@ def derive_pygame_ui_video_path(output_video_path):
     return f"{root}_pygame_ui{ext or '.mp4'}"
 
 
-def stack_frame_buffer(frame_buffer, num_cameras):
-    """Stack a rolling camera frame buffer into a ``(cam, frame, H, W, C)`` array."""
-    images_array = np.zeros(
-        (num_cameras, cfg.NUM_FRAMES, cfg.IMG_HEIGHT, cfg.IMG_WIDTH, cfg.IMG_CHANNELS),
-        dtype=np.uint8,
-    )
-    for t, frame_images in enumerate(frame_buffer):
-        for c in range(num_cameras):
-            images_array[c, t] = frame_images[c]
-    return images_array
+def stack_frame_buffer(frame_buffer, frame_ticks):
+    """Stack the buffered ticks ``frame_ticks`` before the newest into ``(cam, frame, H, W, C)``."""
+    return np.stack([frame_buffer[-1 - tick] for tick in frame_ticks], axis=1)
