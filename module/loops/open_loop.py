@@ -11,6 +11,7 @@ video. The recorded seven-camera superset is subset to the selected version's ri
 """
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
@@ -73,20 +74,28 @@ def run(adapter, args):
     model, processor = _load_model(adapter, args)
     print("Model loaded!")
 
+    def load_frame(frame_index):
+        arrays = load_open_loop_arrays(
+            args.data_root, trajectory, frame_ids, frame_index,
+            num_history_steps=adapter.num_history_steps, frame_ticks=adapter.frame_ticks,
+            camera_order=camera_order,
+        )
+        return adapter.prepare_model_input(
+            arrays["image_frames"], arrays["history_xyz"], arrays["history_rot"], arrays["t0_us"]
+        )
+
+    # Load and prepare the next recorded frame on a CPU thread while the GPU runs this one.
+    prefetch = ThreadPoolExecutor(max_workers=1)
+    next_input = prefetch.submit(load_frame, start_index)
     predictions, cot_texts, inference_times, camera_images = [], [], [], []
     for frame_index in range(start_index, len(frame_ids)):
         display_index = frame_index - start_index + 1
         frame_id = frame_ids[frame_index]
         print(f"  Frame {display_index}/{frames_to_process} (CARLA frame={frame_id})")
 
-        arrays = load_open_loop_arrays(
-            args.data_root, trajectory, frame_ids, frame_index,
-            num_history_steps=adapter.num_history_steps, frame_ticks=adapter.frame_ticks,
-            camera_order=camera_order,
-        )
-        model_input = adapter.prepare_model_input(
-            arrays["image_frames"], arrays["history_xyz"], arrays["history_rot"], arrays["t0_us"]
-        )
+        model_input = next_input.result()
+        if frame_index + 1 < len(frame_ids):
+            next_input = prefetch.submit(load_frame, frame_index + 1)
         torch.manual_seed(cfg.INFERENCE_SEED)
         torch.cuda.manual_seed_all(cfg.INFERENCE_SEED)
         inference_start = time.perf_counter()
@@ -102,6 +111,7 @@ def run(adapter, args):
         )
         print(f"    Inference: {inference_time:.2f}s | CoC: {cot_text[:80]}...")
 
+    prefetch.shutdown()
     avg_time = float(np.mean(inference_times)) if inference_times else 0.0
     print("\n" + "=" * 60)
     print("Summary")

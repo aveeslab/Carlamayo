@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 
@@ -75,13 +76,12 @@ class RunRecorder:
             os.makedirs(os.path.join(output_dir, name), exist_ok=True)
         self.poses = {}
         self._records = open(os.path.join(output_dir, "records.jsonl"), "w", buffering=1)
+        # JPEG encoding (~60 ms per tick for six 1080p cameras) runs on a writer thread;
+        # OpenCV releases the GIL, so it overlaps inference and the next simulation tick.
+        self._writer = ThreadPoolExecutor(max_workers=1)
 
     def add_frame(self, frame_id, images_rgb, pose):
-        for name, image in zip(self.camera_names, images_rgb):
-            cv2.imwrite(
-                frame_file_path(self.output_dir, name, frame_id),
-                cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
-            )
+        self._writer.submit(self._write_images, frame_id, images_rgb)
         self.poses[int(frame_id)] = {
             key: round(float(pose[key]), 6) for key in ("x", "y", "z", "pitch", "yaw", "roll")
         }
@@ -91,7 +91,15 @@ class RunRecorder:
     def add_record(self, record):
         self._records.write(json.dumps(record, default=_to_jsonable) + "\n")
 
+    def _write_images(self, frame_id, images_rgb):
+        for name, image in zip(self.camera_names, images_rgb):
+            cv2.imwrite(
+                frame_file_path(self.output_dir, name, frame_id),
+                cv2.cvtColor(image, cv2.COLOR_RGB2BGR),
+            )
+
     def close(self):
+        self._writer.shutdown(wait=True)
         self._records.close()
         self._save_trajectory()
 

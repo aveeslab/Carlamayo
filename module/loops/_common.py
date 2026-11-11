@@ -1,8 +1,13 @@
 """Shared helpers for the CARLA loop runners."""
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+
+# NumPy copies release the GIL; per-camera threads stack the frame buffer several times
+# faster than one np.stack (Edge copies 6 cameras x 7 ticks of 1080p frames per tick).
+_STACK_POOL = ThreadPoolExecutor(max_workers=8)
 
 
 def collect_oom_kwargs(args):
@@ -36,4 +41,12 @@ def derive_pygame_ui_video_path(output_video_path):
 
 def stack_frame_buffer(frame_buffer, frame_ticks):
     """Stack the buffered ticks ``frame_ticks`` before the newest into ``(cam, frame, H, W, C)``."""
-    return np.stack([frame_buffer[-1 - tick] for tick in frame_ticks], axis=1)
+    frames = [frame_buffer[-1 - tick] for tick in frame_ticks]
+    stacked = np.empty((len(frames[0]), len(frames), *frames[0].shape[1:]), frames[0].dtype)
+
+    def fill(camera):
+        for t, frame in enumerate(frames):
+            stacked[camera, t] = frame[camera]
+
+    list(_STACK_POOL.map(fill, range(len(frames[0]))))
+    return stacked

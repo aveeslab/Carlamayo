@@ -2,6 +2,7 @@
 
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 from PIL import Image
@@ -87,19 +88,15 @@ def load_camera_history(
 ):
     """Load the frames ``frame_ticks`` before t0 as ``camera, time, height, width, channel``."""
 
-    camera_frames = []
-    for camera_name in camera_order:
-        frames = []
-        camera_dir = os.path.join(data_root, camera_name)
-        for tick in frame_ticks:
-            frame_index = max(0, t0_index - tick)
-            frame_id = frame_ids[frame_index]
-            image_path = os.path.join(camera_dir, f"{frame_id:06d}.jpg")
-            image = Image.open(image_path).convert("RGB")
-            frames.append(np.asarray(image, dtype=np.uint8))
-        camera_frames.append(np.stack(frames, axis=0))
-
-    return np.stack(camera_frames, axis=0)
+    paths = [
+        os.path.join(data_root, camera_name, f"{frame_ids[max(0, t0_index - tick)]:06d}.jpg")
+        for camera_name in camera_order
+        for tick in frame_ticks
+    ]
+    # Pillow decodes JPEGs outside the GIL, so the images decode in parallel.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        images = list(pool.map(lambda path: np.asarray(Image.open(path).convert("RGB")), paths))
+    return np.stack(images).reshape(len(camera_order), len(frame_ticks), *images[0].shape)
 
 
 def load_front_camera_image(data_root, frame_id, camera_name=FRONT_CAMERA_NAME):
