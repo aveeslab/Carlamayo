@@ -5,7 +5,7 @@
 
 """Closed-loop entrypoint. Equivalent to ``carlamayo.py --loop closed``.
 
-Requires ``--version {1,1.5,2}``; see ``python carlamayo.py --loop closed --help``.
+Requires ``--version {1,1.5,2,2-edge}``; see ``python carlamayo.py --loop closed --help``.
 """
 
 from carlamayo import main

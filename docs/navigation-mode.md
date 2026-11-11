@@ -2,7 +2,7 @@
 
 Navigation mode runs Alpamayo closed-loop trajectory generation with a runtime text instruction. Use it when you want the ego vehicle to follow a natural-language driving command such as turning, lane choice, or route preference.
 
-> Navigation requires `--version 1.5` or `--version 2` (Alpamayo 1 / R1 has no navigation conditioning). Classifier-free-guidance weights other than `1.0` are supported only by `--version 1.5`.
+> Navigation requires `--version 1.5`, `--version 2` or `--version 2-edge` (Alpamayo 1 / R1 has no navigation conditioning). Classifier-free-guidance weights other than `1.0` are supported only by `--version 1.5`.
 
 ## Start CARLA
 

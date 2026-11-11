@@ -1,6 +1,6 @@
 """Version-agnostic Alpamayo adapter interface and shared helpers.
 
-Each supported Alpamayo release (1 / 1.5 / 2) ships its own Python package, model
+Each supported Alpamayo release (1 / 1.5 / 2 / 2 Edge) ships its own Python package, model
 class, camera contract, and trajectory-sampling API. An adapter wraps one release
 behind a single interface so the CARLA loops (open / closed / live-open) stay
 version-agnostic. The heavy model package is imported lazily inside ``load_model``

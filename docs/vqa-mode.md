@@ -2,7 +2,7 @@
 
 VQA mode asks Alpamayo a driving-scene question over the current CARLA camera frames. It is for visual question answering only; VQA does not produce trajectories, so the ego vehicle is held braked while this mode is active.
 
-> VQA requires `--version 1.5` or `--version 2` (Alpamayo 1 / R1 has no VQA).
+> VQA requires `--version 1.5`, `--version 2` or `--version 2-edge` (Alpamayo 1 / R1 has no VQA).
 
 ## Start CARLA
 

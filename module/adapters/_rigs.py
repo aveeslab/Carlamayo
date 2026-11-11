@@ -65,6 +65,12 @@ SEVEN_CAMERA_RIG = {
 }
 SEVEN_CAMERA_INDICES = (0, 1, 2, 3, 4, 5, 6)
 
+# Alpamayo 2 Edge consumes every camera of this ring except the rear tele.
+SIX_CAMERA_RIG = {
+    name: cam for name, cam in SEVEN_CAMERA_RIG.items() if name != "camera_rear_tele_30fov"
+}
+SIX_CAMERA_INDICES = (0, 1, 2, 3, 5, 6)
+
 # Alpamayo 1 (R1) and 1.5 both consume this four-camera subset: canonical indices
 # [0, 1, 2, 6] = cross-left, front-wide, cross-right, front-tele.
 FOUR_CAMERA_RIG = {

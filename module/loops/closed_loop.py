@@ -67,12 +67,12 @@ def _check_capabilities(adapter, args):
     if args.mode == "navigation" and not adapter.supports_navigation:
         raise SystemExit(
             f"{adapter.display_name} does not support navigation mode. "
-            "Use --version 1.5 or 2, or --mode normal."
+            "Use --version 1.5, 2 or 2-edge, or --mode normal."
         )
     if args.mode == "vqa" and not adapter.supports_vqa:
         raise SystemExit(
             f"{adapter.display_name} does not support VQA mode. "
-            "Use --version 1.5 or 2, or --mode normal."
+            "Use --version 1.5, 2 or 2-edge, or --mode normal."
         )
     if args.oom_free and not adapter.supports_oom_free:
         raise SystemExit(

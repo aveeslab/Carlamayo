@@ -159,6 +159,7 @@ venv.bak/
 venv-carla/
 a1_5_venv/
 a1_5_carla_venv/
+a2_edge_venv/
 # CARLA/Alpamayo generated validation artifacts
 carla_data*/
 carla_alpamayo_*.mp4

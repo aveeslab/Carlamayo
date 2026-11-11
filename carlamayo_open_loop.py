@@ -5,7 +5,7 @@
 
 """Open-loop entrypoint. Equivalent to ``carlamayo.py --loop open``.
 
-Requires ``--version {1,1.5,2}``; see ``python carlamayo.py --loop open --help``.
+Requires ``--version {1,1.5,2,2-edge}``; see ``python carlamayo.py --loop open --help``.
 """
 
 from carlamayo import main

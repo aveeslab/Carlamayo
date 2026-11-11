@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .base import AlpamayoAdapter
 
-SUPPORTED_VERSIONS = ("1", "1.5", "2")
+SUPPORTED_VERSIONS = ("1", "1.5", "2", "2-edge")
 
 
 def get_adapter(version: str) -> AlpamayoAdapter:
@@ -18,6 +18,7 @@ def get_adapter(version: str) -> AlpamayoAdapter:
         "1": "1", "r1": "1", "1.0": "1", "alpamayo1": "1", "alpamayo-r1": "1",
         "1.5": "1.5", "15": "1.5", "alpamayo1.5": "1.5",
         "2": "2", "2.0": "2", "super": "2", "alpamayo2": "2",
+        "2-edge": "2-edge", "2edge": "2-edge", "edge": "2-edge", "alpamayo2-edge": "2-edge",
     }
     resolved = aliases.get(normalized)
     if resolved == "1":
@@ -32,6 +33,10 @@ def get_adapter(version: str) -> AlpamayoAdapter:
         from .alpamayo_2 import Alpamayo2Adapter
 
         return Alpamayo2Adapter()
+    if resolved == "2-edge":
+        from .alpamayo_2_edge import Alpamayo2EdgeAdapter
+
+        return Alpamayo2EdgeAdapter()
     raise ValueError(
         f"Unsupported Alpamayo version {version!r}. Expected one of: "
         f"{', '.join(SUPPORTED_VERSIONS)}."

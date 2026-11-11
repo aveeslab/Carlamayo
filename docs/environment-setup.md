@@ -15,7 +15,7 @@ This guide covers the required environments for CARLA data collection, Alpamayo 
 
 ## 0. Clone the Repository and Submodules
 
-Clone with all Alpamayo submodules (1 / 1.5 / 2 and OOM-free):
+Clone with all Alpamayo submodules (1 / 1.5 / 2 / 2 Edge and OOM-free):
 
 ```bash
 git clone --recurse-submodules https://github.com/aveeslab/Carlamayo.git
@@ -30,7 +30,8 @@ git submodule update --init --recursive
 
 Each Alpamayo release stays as a submodule and is not vendored:
 `third_party/alpamayo1` (R1, `--version 1`), `third_party/alpamayo1.5`
-(`--version 1.5`), `third_party/alpamayo2` (`--version 2`), and
+(`--version 1.5`), `third_party/alpamayo2` (`--version 2`),
+`third_party/alpamayo2-edge` (`--version 2-edge`), and
 `third_party/oom-free-alpamayo` (used by `--oom-free`). You only need to install
 the package(s) for the version(s) you plan to run.
 
@@ -108,6 +109,7 @@ you use, then authenticate:
 - [Alpamayo-R1-10B](https://huggingface.co/nvidia/Alpamayo-R1-10B)
 - [Alpamayo-1.5-10B](https://huggingface.co/nvidia/Alpamayo-1.5-10B)
 - [Alpamayo2-Super](https://huggingface.co/nvidia/Alpamayo2-Super)
+- [Alpamayo2-Edge](https://huggingface.co/nvidia/Alpamayo2-Edge)
 
 ```bash
 pip install huggingface_hub
@@ -130,3 +132,20 @@ python -m pip install --no-deps -e third_party/alpamayo1 -e third_party/alpamayo
 python -m pip install --no-deps -e third_party/oom-free-alpamayo  # optional: --oom-free (1.5)
 python -m pip install -r requirements-alpamayo.txt -r requirements-carla.txt
 ```
+
+## 4. Alpamayo 2 Edge Environment
+
+Alpamayo 2 Edge (`--version 2-edge`) pins Transformers 5.17, so it cannot share an
+environment with 1 / 1.5 / 2. Give it its own; this one covers open-loop, closed-loop
+and live-open-loop runs:
+
+```bash
+uv venv a2_edge_venv --python 3.12
+source a2_edge_venv/bin/activate
+uv pip install -e third_party/alpamayo2-edge
+uv pip install --no-deps "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl"
+uv pip install -r requirements-alpamayo.txt -r requirements-carla.txt
+```
+
+Edge runs with FlashAttention 2 and NVIDIA's `tuned` acceleration (`torch.compile` +
+CUDA graphs), so the first inference of a run compiles for tens of seconds.

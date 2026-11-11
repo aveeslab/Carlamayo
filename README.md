@@ -2,7 +2,7 @@
 
 # CarlaMayo
 
-### NVIDIA Alpamayo (1 / 1.5 / 2) + CARLA Simulator
+### NVIDIA Alpamayo (1 / 1.5 / 2 / 2 Edge) + CARLA Simulator
 
 ![Closed-loop Demo](assets/carla_alpamayo_demo.gif)
 
@@ -13,13 +13,14 @@
 > **📖 Please read the Hugging Face model card for the version you run first**
 > ([Alpamayo-R1](https://huggingface.co/nvidia/Alpamayo-R1-10B),
 > [Alpamayo 1.5](https://huggingface.co/nvidia/Alpamayo-1.5-10B),
-> [Alpamayo 2 Super](https://huggingface.co/nvidia/Alpamayo2-Super)).
+> [Alpamayo 2 Super](https://huggingface.co/nvidia/Alpamayo2-Super),
+> [Alpamayo 2 Edge](https://huggingface.co/nvidia/Alpamayo2-Edge)).
 > Each card covers architecture, inputs/outputs, licensing, and tested hardware. This
 > repository focuses on CARLA setup, data collection, and open/closed/live-open inference.
 
 ## Alpamayo Versions
 
-Pick the model with `--version`. All three are tracked as git submodules under
+Pick the model with `--version`. All four are tracked as git submodules under
 `third_party/` and imported at runtime by a per-version adapter.
 
 | `--version` | Model | Package | Cameras | Navigation | VQA | OOM-free |
@@ -27,6 +28,11 @@ Pick the model with `--version`. All three are tracked as git submodules under
 | `1`   | [Alpamayo-R1-10B](https://huggingface.co/nvidia/Alpamayo-R1-10B)   | `alpamayo_r1`    | 4 | – | – | – |
 | `1.5` | [Alpamayo-1.5-10B](https://huggingface.co/nvidia/Alpamayo-1.5-10B) | `alpamayo1_5`    | 4 | ✅ (+CFG) | ✅ | ✅ |
 | `2`   | [Alpamayo2-Super](https://huggingface.co/nvidia/Alpamayo2-Super)   | `alpamayo2_super`| 7-cam ring → 6 per task | ✅ | ✅ | – |
+| `2-edge` | [Alpamayo2-Edge](https://huggingface.co/nvidia/Alpamayo2-Edge)  | `alpamayo2_edge` | 6 (no rear tele) | ✅ | ✅ | – |
+
+Alpamayo 2 Edge needs Transformers 5, so it runs in its own environment (see
+[Environment Setup](docs/environment-setup.md)). Its driving prompt always carries a
+navigation instruction; without `--navigation-text` it uses `"Follow the road"`.
 
 ## Loop Modes
 
@@ -58,7 +64,7 @@ python carlamayo.py --loop open --version 1 --data-root carla_data
 | Requirement | Specification |
 |-------------|---------------|
 | **Python** | 3.12.x for Alpamayo, 3.10.x for CARLA |
-| **GPU** | ≥24 GB VRAM for Alpamayo 1 / 1.5 (10B); ≥80 GB for Alpamayo 2 (34B); ≥6 GB for CARLA |
+| **GPU** | ≥24 GB VRAM for Alpamayo 1 / 1.5 (10B); ≥80 GB for Alpamayo 2 (34B); ≥16 GB for Alpamayo 2 Edge (2B); ≥6 GB for CARLA |
 | **OS** | Linux tested; other platforms unverified |
 | **CARLA** | 0.9.16 |
 
@@ -81,7 +87,7 @@ Data collection, open-loop, closed-loop, and live-open-loop inference:
 ### Closed-Loop UI Modes
 
 The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
-`--mode` (navigation/VQA require `--version 1.5` or `2`). See the mode guides:
+`--mode` (navigation/VQA require `--version 1.5`, `2` or `2-edge`). See the mode guides:
 
 - [Navigation Mode](docs/navigation-mode.md)
 - [VQA Mode](docs/vqa-mode.md)
@@ -90,7 +96,7 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 
 ```
 <repo-root>/
-├── carlamayo.py                 # Unified launcher: --loop {open,closed,live-open} --version {1,1.5,2}.
+├── carlamayo.py                 # Unified launcher: --loop {open,closed,live-open} --version {1,1.5,2,2-edge}.
 ├── carlamayo_open_loop.py       # Thin wrapper: carlamayo.py --loop open.
 ├── carlamayo_closed_loop.py     # Thin wrapper: carlamayo.py --loop closed.
 ├── data_collect.py              # Collect the seven-camera superset + LiDAR + trajectory.
@@ -103,6 +109,7 @@ The closed-loop runner supports `normal`, `navigation`, and `vqa` modes through
 ├── third_party/alpamayo1/       # NVIDIA Alpamayo-R1 git submodule (--version 1).
 ├── third_party/alpamayo1.5/     # NVIDIA Alpamayo 1.5 git submodule (--version 1.5).
 ├── third_party/alpamayo2/       # NVIDIA Alpamayo 2 Super git submodule (--version 2).
+├── third_party/alpamayo2-edge/  # NVIDIA Alpamayo 2 Edge git submodule (--version 2-edge).
 ├── third_party/oom-free-alpamayo/ # OOM-free demand-layering submodule (1.5 --oom-free).
 ├── .github/workflows/ci.yml     # Lightweight GitHub Actions test workflow.
 ├── pyproject.toml               # Python project metadata and Ruff configuration.

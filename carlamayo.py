@@ -5,7 +5,7 @@
 
 """CarlaMayo unified entrypoint.
 
-Select the Alpamayo release with ``--version {1,1.5,2}`` and the CARLA loop with
+Select the Alpamayo release with ``--version {1,1.5,2,2-edge}`` and the CARLA loop with
 ``--loop {open,closed,live-open}``:
 
 * ``open``       Replay a recorded dataset through the model (offline, no driving).
@@ -86,7 +86,7 @@ def build_parser(preset_loop=None):
     parser.add_argument("--mode", choices=("normal", "navigation", "vqa"), default="normal",
                         help="[closed] Inference mode.")
     parser.add_argument("--navigation-text", default="",
-                        help='[closed, live-open] Navigation instruction (1.5 / 2 only).')
+                        help='[closed, live-open] Navigation instruction (1.5 / 2 / 2-edge only).')
     parser.add_argument("--navigation-weight", type=float, default=1.0,
                         help="[closed] Navigation CFG weight (1.5 only for CFG).")
     parser.add_argument("--vqa-question", default="",

@@ -2,7 +2,7 @@
 
 This guide covers CARLA data collection and the three loop modes (open, closed,
 live-open) across Alpamayo versions. Every command selects the model with
-`--version {1,1.5,2}` (required) and, on the unified launcher, the loop with
+`--version {1,1.5,2,2-edge}` (required) and, on the unified launcher, the loop with
 `--loop {open,closed,live-open}`.
 
 ## 1. Data Collection
@@ -77,7 +77,7 @@ Optional pygame UI (starts paused so you can enter navigation/VQA text first):
 python carlamayo.py --loop closed --version 2 --mode normal --pygame-ui
 ```
 
-Mode-specific guides (navigation/VQA require `--version 1.5` or `2`):
+Mode-specific guides (navigation/VQA require `--version 1.5`, `2` or `2-edge`):
 
 - [Navigation Mode](navigation-mode.md)
 - [VQA Mode](vqa-mode.md)
@@ -109,7 +109,7 @@ python carlamayo.py --loop live-open --version 2 --async
 ```
 
 Options: `--async`, `--quantization`, `--oom-free` (1.5), `--navigation-text`
-(observation-only, for 1.5 / 2), `--output-video <path>`. The model never controls
+(observation-only, for 1.5 / 2 / 2-edge), `--output-video <path>`. The model never controls
 the vehicle in this mode.
 
 Output: `carla_alpamayo_live_open_loop_result.mp4`
