@@ -52,8 +52,9 @@ CAMERA_BODY_CLEARANCE_M = 0.08
 
 # Control config
 CONTROL_DT = 0.1
-THROTTLE_MAX = 0.75
-BRAKE_MAX = 1.0
+# Throttle while the first observation window fills after a spawn or respawn (the
+# official example's bootstrap), so the first plan does not start from rest.
+BOOTSTRAP_THROTTLE = 0.25
 
 # Async closed loop: brake instead of following a prediction older than this
 # (simulation seconds since its inputs were captured).
@@ -62,48 +63,21 @@ TRAJECTORY_MAX_AGE_SEC = 3.0
 # Auto-respawn after collision.
 RESPAWN_COLLISION_COOLDOWN_FRAMES = 10
 
-# Trajectory follower (module.trajectory_follower): pure-pursuit steering from the
-# rear axle to a speed-dependent lookahead point, steer change rate-limited.
-PID_LOOKAHEAD_MIN_M = 4.0
-PID_LOOKAHEAD_MAX_M = 12.0
-PID_LOOKAHEAD_SPEED_GAIN = 0.4
-# Target speed = Alpamayo's planned speed, averaged over PID_SPEED_PREVIEW_SEC of the
-# plan starting PID_SPEED_LEAD_SEC ahead (covers actuator lag), capped at
-# PID_TARGET_SPEED_MAX_KMH. A planned
-# speed at or below PID_STOP_SPEED_MPS is treated as a stop and holds the brake.
-PID_SPEED_PREVIEW_SEC = 0.5
-PID_SPEED_LEAD_SEC = 1.0
-PID_TARGET_SPEED_MAX_KMH = 35.0
-PID_STOP_SPEED_MPS = 0.25
-# Start-from-rest: below PID_REST_SPEED_MPS, launch at PID_LAUNCH_SPEED_MPS when the
-# remaining plan still covers at least PID_LAUNCH_MIN_PLAN_M, and keep launching while
-# it covers at least PID_LAUNCH_HOLD_PLAN_M.
-PID_REST_SPEED_MPS = 0.5
-PID_LAUNCH_SPEED_MPS = 2.0
-PID_LAUNCH_MIN_PLAN_M = 3.0
-PID_LAUNCH_HOLD_PLAN_M = 1.0
-FOLLOW_STEER_RATE_PER_SEC = 1.0
-# Speed: throttle feedforward measured for the MKZ on a flat road (throttle that holds
-# a steady speed, linear in m/s), plus PI on the m/s error with the integral clamped to
-# FOLLOW_KI_EFFORT_LIMIT of pedal and derivative on measurement. The target is the
-# median of the last FOLLOW_TARGET_MEDIAN_TICKS planned speeds, which drops one-tick
-# dips of the replanned profile without delaying sustained changes; planned stops
-# bypass it.
-FOLLOW_FF_THROTTLE_AT_ZERO = 0.36
-FOLLOW_FF_THROTTLE_PER_MPS = 0.0167
-FOLLOW_KP = 0.35
-FOLLOW_KI = 0.04
-FOLLOW_KD = 0.02
-FOLLOW_KI_EFFORT_LIMIT = 0.3
-FOLLOW_TARGET_MEDIAN_TICKS = 3
-# Braking. Measured on the MKZ: any brake value from 0.03 to 1.0 gives ~6.9 m/s^2, so
-# the brake is on/off, while pedals released shed roughly 0.4 * speed m/s^2. When the
-# target is below FOLLOW_BRAKE_SPEED_RATIO of the current speed, coasting cannot get
-# there in time and the brake is applied at FOLLOW_BRAKE_ON until the target rises
-# above FOLLOW_BRAKE_RELEASE_RATIO of the speed (hysteresis). A planned stop brakes
-# while moving and holds full brake once stopped.
-FOLLOW_BRAKE_SPEED_RATIO = 0.6
-FOLLOW_BRAKE_RELEASE_RATIO = 0.8
-FOLLOW_BRAKE_ON = 0.3
-# Lateral acceleration limit used to cap speed by the plan's curvature ahead (m/s^2).
-FOLLOW_LAT_ACCEL_MAX = 3.0
+# Trajectory tracker (module.trajectory_follower), the defaults of CARLA's official
+# Alpamayo example: pure-pursuit steering from the rear axle to the first plan point
+# TRACKER_LOOKAHEAD_M past the nearest one, normalized by TRACKER_MAX_WHEEL_ANGLE_DEG and
+# rate-limited; a PID on the plan's speed at the current trajectory time step. A
+# planned speed at or below TRACKER_STOP_TARGET_SPEED_MPS is a stop: brake at least
+# TRACKER_MIN_STOP_BRAKE while moving, TRACKER_HOLD_BRAKE below TRACKER_HOLD_SPEED_MPS.
+TRACKER_LOOKAHEAD_M = 3.0
+TRACKER_MAX_WHEEL_ANGLE_DEG = 70.0
+TRACKER_STEERING_GAIN = 1.0
+TRACKER_MAX_STEER_RATE_PER_S = 1.0
+TRACKER_SPEED_KP = 0.35
+TRACKER_SPEED_KI = 0.04
+TRACKER_SPEED_KD = 0.02
+TRACKER_SPEED_INTEGRAL_LIMIT = 5.0
+TRACKER_STOP_TARGET_SPEED_MPS = 0.25
+TRACKER_HOLD_SPEED_MPS = 0.15
+TRACKER_MIN_STOP_BRAKE = 0.25
+TRACKER_HOLD_BRAKE = 1.0

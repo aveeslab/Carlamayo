@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 AVEES Lab
 # SPDX-License-Identifier: Apache-2.0
 #
-# Closed-loop CARLA control: Alpamayo trajectories drive the ego via PID.
+# Closed-loop CARLA control: Alpamayo trajectories drive the ego via the official tracker.
 
 """Closed-loop runner: the selected Alpamayo model controls the ego vehicle.
 
-Every tick (or asynchronously) the model predicts a trajectory that a PID follower
-converts to steering/throttle/brake. Supports ``normal`` / ``navigation`` / ``vqa``
-modes; navigation and VQA require a version whose adapter advertises support.
+Every tick (or asynchronously) the model predicts a trajectory that the official
+CARLA Alpamayo tracker converts to steering/throttle/brake. Supports ``normal`` /
+``navigation`` / ``vqa`` modes; navigation and VQA require a version whose adapter
+advertises support.
 """
 
 import queue
@@ -32,7 +33,11 @@ from module.loops._common import (
     stack_frame_buffer,
 )
 from module.navigation_control import NavigationControlState
-from module.trajectory_follower import TrajectoryFollower, planned_speeds, trajectory_to_world
+from module.trajectory_follower import (
+    TrajectoryTracker,
+    alpamayo_to_carla_local,
+    pose_in_plan_frame,
+)
 from module.respawn_control import RespawnMonitor
 from module.visualization import VideoRecorder, create_visualization_frame
 from module.vlm_generate_optimization import VlmGenerateTiming
@@ -184,10 +189,11 @@ def run(adapter, args):
             print("Model loaded!")
             print(f"VRAM: {torch.cuda.memory_allocated() / 1024**3:.1f} GB allocated")
 
-        follower = TrajectoryFollower(carla_if.ego_vehicle)
+        tracker = TrajectoryTracker()
 
         current_trajectory = None
-        current_trajectory_world = None
+        current_path = None
+        current_plan_tf = None
         current_pred_xyz = None
         prev_selected_trajectory = None
         current_selected_traj_idx = 0
@@ -220,12 +226,12 @@ def run(adapter, args):
         def _auto_respawn(reason):
             nonlocal current_trajectory, current_pred_xyz, prev_selected_trajectory
             nonlocal current_selected_traj_idx, current_cot, current_inference_time
-            nonlocal current_trajectory_frame, prev_control, pending_inference, follower
+            nonlocal current_trajectory_frame, prev_control, pending_inference
             nonlocal respawn_revision, last_vqa_submitted_revision, last_vqa_completed_revision
 
             print(f"[Frame {frame_count}] Auto-respawn: {reason}")
             carla_if.respawn_ego_vehicle()
-            follower = TrajectoryFollower(carla_if.ego_vehicle)
+            tracker.reset()
             current_trajectory = None
             current_pred_xyz = None
             prev_selected_trajectory = None
@@ -448,6 +454,7 @@ def run(adapter, args):
                 print(f"[Frame {frame_count}] Warning: {exc}; braking and skipping this tick.")
                 # A missing tick would shift every buffered frame against frame_ticks.
                 frame_buffer.clear()
+                tracker.reset()
                 carla_if.apply_control(0.0, 0.0, 1.0)
                 prev_control = {"steer": 0.0, "throttle": 0.0, "brake": 1.0}
                 latest_telemetry = {
@@ -473,12 +480,18 @@ def run(adapter, args):
             if run_recorder is not None:
                 run_recorder.add_frame(carla_if.frame_id, images, state)
             new_inference = None
+            # Like the official example, the first plan waits for full camera and ego
+            # history (16 ticks, 20 for Edge) after a spawn or respawn.
+            observation_ready = (
+                len(frame_buffer) >= frame_window
+                and len(carla_if.history_buffer) >= carla_if.history_steps
+            )
 
             if args.async_mode:
                 now_ts = time.time()
                 if args.mode == "vqa":
                     should_submit_inference = (
-                        len(frame_buffer) >= frame_window
+                        observation_ready
                         and bool(nav_state.vqa_question)
                         and not pending_inference
                         and nav_state.revision != last_vqa_submitted_revision
@@ -486,7 +499,7 @@ def run(adapter, args):
                     )
                 else:
                     should_submit_inference = (
-                        len(frame_buffer) >= frame_window
+                        observation_ready
                         and not pending_inference
                         and (now_ts - last_inference_submit_ts) >= inference_interval_sec
                     )
@@ -550,10 +563,8 @@ def run(adapter, args):
                         current_trajectory = traj_samples[selected_idx]
                         # Anchor the plan at the pose it was predicted from, not the
                         # pose the ego has reached by the time the result arrives.
-                        current_trajectory_world = trajectory_to_world(
-                            latest_result["ego_tf"], current_trajectory
-                        )
-                        current_speeds = planned_speeds(current_trajectory)
+                        current_plan_tf = latest_result["ego_tf"]
+                        current_path = alpamayo_to_carla_local(current_trajectory)
                         prev_selected_trajectory = current_trajectory.copy()
                         current_pred_xyz = traj_samples
                         current_cot = adapter.extract_cot_text(extra)
@@ -577,7 +588,7 @@ def run(adapter, args):
                         if args.debug_worker_traceback and latest_result.get("traceback"):
                             print(latest_result["traceback"].rstrip())
             else:
-                if len(frame_buffer) >= frame_window:
+                if observation_ready:
                     images_array = stack_frame_buffer(frame_buffer, adapter.frame_ticks)
                     history_xyz, history_rot = carla_if.get_history_in_local_frame()
                     model_data = adapter.prepare_model_input(
@@ -622,10 +633,8 @@ def run(adapter, args):
                         )
                         current_selected_traj_idx = selected_idx
                         current_trajectory = traj_samples[selected_idx]
-                        current_trajectory_world = trajectory_to_world(
-                            carla_if.ego_vehicle.get_transform(), current_trajectory
-                        )
-                        current_speeds = planned_speeds(current_trajectory)
+                        current_plan_tf = carla_if.ego_vehicle.get_transform()
+                        current_path = alpamayo_to_carla_local(current_trajectory)
                         prev_selected_trajectory = current_trajectory.copy()
                         current_pred_xyz = traj_samples
                         current_cot = adapter.extract_cot_text(extra)
@@ -653,17 +662,21 @@ def run(adapter, args):
                 else (frame_count - current_trajectory_frame) * cfg.CONTROL_DT
             )
             if current_trajectory is not None and trajectory_age <= cfg.TRAJECTORY_MAX_AGE_SEC:
-                vehicle_tf = carla_if.ego_vehicle.get_transform()
-                steering, throttle, brake, ctrl_debug = follower.compute_control(
-                    vehicle_tf, current_trajectory_world, float(state["speed"]),
-                    current_speeds, trajectory_age,
+                position, yaw = pose_in_plan_frame(
+                    current_plan_tf, carla_if.ego_vehicle.get_transform()
                 )
+                # Step i of the plan's 0.1 s timeline, i ticks after its inputs.
+                command = tracker.command(
+                    current_path, position, yaw, float(state["speed"]),
+                    trajectory_time_index=frame_count - current_trajectory_frame,
+                )
+                steering, throttle, brake = command.steer, command.throttle, command.brake
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}
                 carla_if.apply_control(steering, throttle, brake)
                 control_record = {
-                    "target_speed_kmh": ctrl_debug.get("target_speed_kmh"),
-                    "planned_stop": ctrl_debug.get("planned_stop"),
-                    "launch": ctrl_debug.get("launch"),
+                    "target_speed_kmh": command.target_speed_mps * 3.6,
+                    "speed_index": command.speed_index,
+                    "hold_active": command.hold_active,
                     "control_applied": [steering, throttle, brake],
                 }
 
@@ -701,8 +714,16 @@ def run(adapter, args):
                         f"[Frame {frame_count}] Trajectory is {trajectory_age:.1f}s old (sim); "
                         "braking until a newer prediction arrives."
                     )
-                carla_if.apply_control(0.0, 0.0, 1.0)
-                control_record = {"control_applied": [0.0, 0.0, 1.0]}
+                # Until the first plan after a (re)spawn, coast forward on the official
+                # bootstrap throttle; otherwise (VQA, stale or discarded plan) brake.
+                bootstrapping = (
+                    args.mode != "vqa" and current_trajectory is None and not observation_ready
+                )
+                throttle, brake = (cfg.BOOTSTRAP_THROTTLE, 0.0) if bootstrapping else (0.0, 1.0)
+                tracker.reset()
+                carla_if.apply_control(0.0, throttle, brake)
+                prev_control = {"steer": 0.0, "throttle": throttle, "brake": brake}
+                control_record = {"control_applied": [0.0, throttle, brake]}
                 latest_telemetry = {
                     "frame": frame_count,
                     "speed_kmh": state["speed"] * 3.6,

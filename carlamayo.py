@@ -9,7 +9,7 @@ Select the Alpamayo release with ``--version {1,1.5,2,2-edge}`` and the CARLA lo
 ``--loop {open,closed,live-open}``:
 
 * ``open``       Replay a recorded dataset through the model (offline, no driving).
-* ``closed``     The model drives the ego vehicle via a PID follower.
+* ``closed``     The model drives the ego vehicle via the official CARLA Alpamayo tracker.
 * ``live-open``  CARLA autopilot drives; the model runs live and is observed open-loop.
 
 The thin ``carlamayo_open_loop.py`` / ``carlamayo_closed_loop.py`` scripts call this

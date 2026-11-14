@@ -31,9 +31,8 @@ def test_output_paths_and_map_defaults_are_public_run_defaults():
 
 def test_control_and_respawn_limits_are_safe_positive_ranges():
     assert 0.0 < cfg.CONTROL_DT <= 1.0
-    assert 0.0 <= cfg.THROTTLE_MAX <= 1.0
-    assert 0.0 <= cfg.BRAKE_MAX <= 1.0
-    assert cfg.FOLLOW_TARGET_MEDIAN_TICKS >= 1
+    assert 0.0 <= cfg.BOOTSTRAP_THROTTLE <= 1.0
+    assert cfg.TRACKER_HOLD_SPEED_MPS <= cfg.TRACKER_STOP_TARGET_SPEED_MPS
     assert cfg.RESPAWN_COLLISION_COOLDOWN_FRAMES > 0
 
 

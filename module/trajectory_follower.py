@@ -1,26 +1,22 @@
-"""Follow an Alpamayo trajectory in CARLA: pure-pursuit steering, feedforward + PI speed.
+"""Follow an Alpamayo trajectory in CARLA with the official example's tracker.
 
-Alpamayo replans every tick with sampled CoT and diffusion noise, so the plan the
-controller sees is noisy and restarts from the current pose each time. The follower
-therefore tracks the plan in the world frame from the waypoint nearest the rear
-axle (steering) and from the plan's own timing (speed), filters one-tick dips in
-the planned speed, and holds planned stops. Speed control is a measured
-throttle feedforward plus a PI with anti-windup, not CARLA's ``agents`` PID, whose
-integral only spans one second and whose km/h gains saturate at ~1 km/h error.
+A port of ``TrajectoryTracker`` from CARLA's official Alpamayo example
+(``PythonAPI/examples/av_stacks/alpamayo/alpamayo_controller.py``): pure-pursuit steering
+to the first plan point at least ``cfg.TRACKER_LOOKAHEAD_M`` past the point nearest the
+rear axle, rate-limited, and a PID on the plan's speed at the current trajectory time
+step, giving one signed effort (throttle positive, brake negative). The plan and the
+ego pose are both expressed in the CARLA-local (y right) rear-axle frame of the pose
+the plan was predicted from.
 """
 
 from __future__ import annotations
 
 import math
-from collections import deque
+from dataclasses import dataclass
 
-import carla
 import numpy as np
 
 from . import config as cfg
-
-# Alpamayo predicts 64 waypoints at 10 Hz (6.4 s).
-WAYPOINT_DT = 0.1
 
 
 def alpamayo_to_carla_local(wp_ego):
@@ -30,189 +26,164 @@ def alpamayo_to_carla_local(wp_ego):
     return wp_local
 
 
-def local_to_world(vehicle_tf, wp_local):
-    """Convert local waypoints to world using CARLA transform."""
-    wp_world = []
-    for p in wp_local:
-        loc_w = vehicle_tf.transform(carla.Location(x=float(p[0]), y=float(p[1]), z=float(p[2])))
-        wp_world.append([loc_w.x, loc_w.y, loc_w.z])
-    return np.asarray(wp_world, dtype=np.float64)
+def pose_in_plan_frame(plan_tf, vehicle_tf):
+    """Rear-axle position and yaw (rad) of ``vehicle_tf`` in the rear-axle frame of ``plan_tf``.
 
-
-def trajectory_to_world(vehicle_tf, wp_ego):
-    """World xyz of rear-axle-relative Alpamayo waypoints for the pose they were predicted at."""
-    wp_local = alpamayo_to_carla_local(wp_ego)
-    # Alpamayo waypoints start at the rear axle; CARLA transforms use the actor origin.
-    return local_to_world(vehicle_tf, wp_local + [cfg.EGO_REAR_AXLE_X, 0.0, 0.0])
-
-
-def planned_speeds(wp_ego):
-    """Planned speed (m/s) over each 0.1 s step of a rear-axle-relative Alpamayo trajectory."""
-    xy = np.vstack([np.zeros((1, 2)), np.asarray(wp_ego)[:, :2]])
-    return np.linalg.norm(np.diff(xy, axis=0), axis=1) / WAYPOINT_DT
-
-
-def pure_pursuit_steer(ego_xy, yaw_rad, target_xy, wheelbase_m, max_steer_rad):
-    """Normalized CARLA steer [-1, 1] that drives the rear axle onto ``target_xy``.
-
-    CARLA is left-handed (x forward, y right, yaw clockwise from above), so a target to
-    the right gives a positive bearing and a positive (right) steer.
+    Both are ``carla.Transform`` actor poses; the result is CARLA-local (y right).
     """
-    dx, dy = target_xy[0] - ego_xy[0], target_xy[1] - ego_xy[1]
-    forward = math.cos(yaw_rad) * dx + math.sin(yaw_rad) * dy
-    right = -math.sin(yaw_rad) * dx + math.cos(yaw_rad) * dy
-    distance = math.hypot(dx, dy)
-    if distance < 1e-3:
-        return 0.0
-    bearing = math.atan2(right, forward)
-    curvature = 2.0 * math.sin(bearing) / distance
-    wheel_angle = math.atan(wheelbase_m * curvature)
-    return float(np.clip(wheel_angle / max_steer_rad, -1.0, 1.0))
+    rel = np.array(plan_tf.get_inverse_matrix()) @ np.array(vehicle_tf.get_matrix())
+    rear_axle = np.array([cfg.EGO_REAR_AXLE_X, 0.0, 0.0])
+    position = (rel @ np.append(rear_axle, 1.0))[:3] - rear_axle
+    return position, math.atan2(rel[1, 0], rel[0, 0])
 
 
-def max_path_curvature(path_xy):
-    """Largest curvature (1/m) over consecutive waypoint triples of a 2-D path."""
-    pts = np.asarray(path_xy, dtype=np.float64)
-    if len(pts) < 3:
-        return 0.0
-    a, b, c = pts[:-2], pts[1:-1], pts[2:]
-    ab, bc, ca = b - a, c - b, a - c
-    cross = np.abs(ab[:, 0] * bc[:, 1] - ab[:, 1] * bc[:, 0])
-    denom = np.linalg.norm(ab, axis=1) * np.linalg.norm(bc, axis=1) * np.linalg.norm(ca, axis=1)
-    valid = denom > 1e-6
-    if not np.any(valid):
-        return 0.0
-    # Menger curvature: 4 * triangle area / product of side lengths.
-    return float(np.max(2.0 * cross[valid] / denom[valid]))
+@dataclass(frozen=True)
+class ControlCommand:
+    throttle: float
+    brake: float
+    steer: float
+    target_speed_mps: float
+    target_index: int
+    requested_steer: float = 0.0
+    speed_index: int = 0
+    speed_error_mps: float = 0.0
+    longitudinal_effort: float = 0.0
+    hold_active: bool = False
 
 
-class TrajectoryFollower:
-    """Stateful follower for one ego vehicle; create a new one after a respawn."""
+class TrajectoryTracker:
+    """Stateful tracker for one ego vehicle; ``reset()`` after a respawn or a brake hold."""
 
-    def __init__(self, vehicle):
-        wheels = vehicle.get_physics_control().wheels
-        self.max_steer_rad = math.radians(max(w.max_steer_angle for w in wheels))
-        self._integral = 0.0
-        self._prev_speed = None
-        self._prev_steer = 0.0
-        self._recent_targets = deque(maxlen=cfg.FOLLOW_TARGET_MEDIAN_TICKS)
-        self._launching = False
-        self._braking = False
+    def __init__(
+        self,
+        wheelbase_m=cfg.EGO_WHEELBASE_M,
+        max_wheel_angle_deg=cfg.TRACKER_MAX_WHEEL_ANGLE_DEG,
+        lookahead_m=cfg.TRACKER_LOOKAHEAD_M,
+        speed_kp=cfg.TRACKER_SPEED_KP,
+        speed_ki=cfg.TRACKER_SPEED_KI,
+        speed_kd=cfg.TRACKER_SPEED_KD,
+        speed_integral_limit=cfg.TRACKER_SPEED_INTEGRAL_LIMIT,
+        stop_target_speed_mps=cfg.TRACKER_STOP_TARGET_SPEED_MPS,
+        hold_speed_mps=cfg.TRACKER_HOLD_SPEED_MPS,
+        minimum_stop_brake=cfg.TRACKER_MIN_STOP_BRAKE,
+        hold_brake=cfg.TRACKER_HOLD_BRAKE,
+        steering_gain=cfg.TRACKER_STEERING_GAIN,
+        max_steer_rate_per_s=cfg.TRACKER_MAX_STEER_RATE_PER_S,
+    ):
+        self.wheelbase_m = wheelbase_m
+        self.max_wheel_angle_rad = np.deg2rad(max_wheel_angle_deg)
+        self.lookahead_m = lookahead_m
+        self.speed_kp = speed_kp
+        self.speed_ki = speed_ki
+        self.speed_kd = speed_kd
+        self.speed_integral_limit = speed_integral_limit
+        self.stop_target_speed_mps = stop_target_speed_mps
+        self.hold_speed_mps = hold_speed_mps
+        self.minimum_stop_brake = minimum_stop_brake
+        self.hold_brake = hold_brake
+        self.steering_gain = steering_gain
+        self.max_steer_rate_per_s = max_steer_rate_per_s
+        self.reset()
 
-    def _target_speed(self, speeds_mps, speed_mps, elapsed_sec):
-        """Planned speed PID_SPEED_LEAD_SEC ahead, with the start-from-rest launch rule."""
-        now = int(elapsed_sec / WAYPOINT_DT + 1e-6)
-        step = now + int(cfg.PID_SPEED_LEAD_SEC / WAYPOINT_DT + 1e-6)
-        preview = max(1, round(cfg.PID_SPEED_PREVIEW_SEC / WAYPOINT_DT))
-        window = speeds_mps[step:step + preview]
-        target = float(np.mean(window)) if len(window) else 0.0
-        # The launch floor applies from rest until the ego actually reaches the launch
-        # speed, so a plan that keeps "waiting a second, then going" (re-planned every
-        # tick, so the wait never ends) creeps at the launch speed instead of cycling
-        # between launch and planned stop. Hysteresis on the plan length: keep launching
-        # unless the plan collapses below PID_LAUNCH_HOLD_PLAN_M. The remaining plan is
-        # measured from now, without the lead, so an older (async) plan is judged on what
-        # it still intends rather than on its decayed tail.
-        min_plan_m = cfg.PID_LAUNCH_HOLD_PLAN_M if self._launching else cfg.PID_LAUNCH_MIN_PLAN_M
-        max_speed = cfg.PID_LAUNCH_SPEED_MPS if self._launching else cfg.PID_REST_SPEED_MPS
-        launch = (
-            speed_mps < max_speed
-            and float(np.sum(speeds_mps[now:])) * WAYPOINT_DT >= min_plan_m
-        )
-        self._launching = launch
-        if launch:
-            target = max(target, cfg.PID_LAUNCH_SPEED_MPS)
-        return min(target, cfg.PID_TARGET_SPEED_MAX_KMH / 3.6), launch
+    def reset(self):
+        """Reset steering-rate and longitudinal PID state."""
+        self._previous_steer = 0.0
+        self._speed_integral = 0.0
+        self._previous_speed_mps = None
 
-    def _speed_control(self, target_mps, speed_mps, planned_stop):
-        """Feedforward + PI (conditional integration) + derivative on measurement."""
-        if planned_stop:
-            # Brake while moving, hold full brake once (nearly) stopped, never creep
-            # forward. Reset the integrator so the next launch does not inherit a
-            # wound-up term.
-            self._integral = 0.0
-            self._recent_targets.clear()
-            self._prev_speed = speed_mps
-            return 0.0, (1.0 if speed_mps < 0.15 else cfg.FOLLOW_BRAKE_ON)
-        # A single-tick dip in the replanned speed profile is noise: take the median of
-        # the last few targets, which drops it without delaying sustained changes.
-        self._recent_targets.append(target_mps)
-        target = float(np.median(self._recent_targets))
-        error = target - speed_mps
-        dv = 0.0 if self._prev_speed is None else (speed_mps - self._prev_speed) / cfg.CONTROL_DT
-        self._prev_speed = speed_mps
-        feedforward = cfg.FOLLOW_FF_THROTTLE_AT_ZERO + cfg.FOLLOW_FF_THROTTLE_PER_MPS * target
-        effort = (
-            feedforward + cfg.FOLLOW_KP * error + cfg.FOLLOW_KI * self._integral
-            - cfg.FOLLOW_KD * dv
-        )
-        saturated = (effort >= cfg.THROTTLE_MAX and error > 0) or (
-            effort <= -cfg.BRAKE_MAX and error < 0
-        )
-        if not saturated:
-            self._integral += error * cfg.CONTROL_DT
-            limit = cfg.FOLLOW_KI_EFFORT_LIMIT / max(cfg.FOLLOW_KI, 1e-9)
-            self._integral = float(np.clip(self._integral, -limit, limit))
-        # Measured MKZ: any brake value from 0.03 up brakes ~6.9 m/s^2 (on/off), while
-        # pedals released shed about 0.4 * speed m/s^2. Coasting therefore covers a target
-        # down to ~60% of the current speed within the one-second lead; brake below that,
-        # with hysteresis so the on/off brake does not chatter around the threshold.
-        ratio = cfg.FOLLOW_BRAKE_RELEASE_RATIO if self._braking else cfg.FOLLOW_BRAKE_SPEED_RATIO
-        self._braking = effort < 0.0 and target < ratio * speed_mps
-        if self._braking:
-            return 0.0, cfg.FOLLOW_BRAKE_ON
-        return min(max(effort, 0.0), cfg.THROTTLE_MAX), 0.0
+    def _longitudinal_command(self, target_speed_mps, current_speed_mps, time_step):
+        """Return throttle, brake, error, signed PID effort, and hold state."""
+        stop_requested = target_speed_mps <= self.stop_target_speed_mps
+        if stop_requested:
+            target_speed_mps = 0.0
+            # Do not let positive integral accumulated while cruising oppose a newly
+            # requested stop.
+            self._speed_integral = min(self._speed_integral, 0.0)
 
-    def compute_control(self, vehicle_tf, wp_world, speed_mps, speeds_mps, elapsed_sec=0.0):
-        """Return ``(steer, throttle, brake, debug)`` for a world-frame plan.
+        error = target_speed_mps - current_speed_mps
+        speed_derivative = 0.0
+        if self._previous_speed_mps is not None:
+            # Derivative on measurement avoids a kick when a newly sampled trajectory
+            # changes the requested speed at a replan boundary.
+            speed_derivative = -(current_speed_mps - self._previous_speed_mps) / time_step
+        self._previous_speed_mps = current_speed_mps
 
-        ``wp_world`` comes from ``trajectory_to_world`` for the pose the plan was
-        predicted at; ``speeds_mps`` from ``planned_speeds``; ``elapsed_sec`` is the
-        simulation time since that prediction (non-zero with --async).
-        """
-        rear_axle = vehicle_tf.transform(carla.Location(x=cfg.EGO_REAR_AXLE_X))
-        ego_xy = np.array([rear_axle.x, rear_axle.y])
-        yaw = math.radians(vehicle_tf.rotation.yaw)
-        start_idx = int(np.argmin(np.linalg.norm(wp_world[:, :2] - ego_xy, axis=1)))
-        path = wp_world[start_idx:, :2]
-
-        lookahead_m = float(np.clip(
-            cfg.PID_LOOKAHEAD_MIN_M + cfg.PID_LOOKAHEAD_SPEED_GAIN * speed_mps,
-            cfg.PID_LOOKAHEAD_MIN_M, cfg.PID_LOOKAHEAD_MAX_M,
+        candidate_integral = float(np.clip(
+            self._speed_integral + error * time_step,
+            -self.speed_integral_limit, self.speed_integral_limit,
         ))
-        distances = np.linalg.norm(path - ego_xy, axis=1)
-        ahead = np.nonzero(distances >= lookahead_m)[0]
-        target_idx = int(ahead[0]) if len(ahead) else len(path) - 1
-
-        target_mps, launch = self._target_speed(speeds_mps, speed_mps, elapsed_sec)
-        # Vehicle limit the plan may ignore: cap speed by the path curvature ahead so the
-        # lateral acceleration stays below FOLLOW_LAT_ACCEL_MAX (a plan drawn at 35 km/h
-        # through a tight bend is otherwise driven straight into the outside).
-        curvature = max_path_curvature(path[: target_idx + 1])
-        curve_limit = math.inf
-        if curvature > 1e-6:
-            curve_limit = math.sqrt(cfg.FOLLOW_LAT_ACCEL_MAX / curvature)
-        target_mps = min(target_mps, max(curve_limit, cfg.PID_LAUNCH_SPEED_MPS))
-        planned_stop = target_mps <= cfg.PID_STOP_SPEED_MPS
-        throttle, brake = self._speed_control(target_mps, speed_mps, planned_stop)
-        target = float(np.median(self._recent_targets)) if self._recent_targets else 0.0
-        steer = pure_pursuit_steer(
-            ego_xy, yaw, path[target_idx], cfg.EGO_WHEELBASE_M, self.max_steer_rad
+        candidate_effort = (
+            self.speed_kp * error
+            + self.speed_ki * candidate_integral
+            + self.speed_kd * speed_derivative
         )
-        max_delta = cfg.FOLLOW_STEER_RATE_PER_SEC * cfg.CONTROL_DT
-        steer = float(np.clip(steer, self._prev_steer - max_delta, self._prev_steer + max_delta))
-        self._prev_steer = steer
+        # Conditional integration: do not wind the integral farther into a saturated
+        # pedal command.
+        if not (
+            (candidate_effort > 1.0 and error > 0.0) or (candidate_effort < -1.0 and error < 0.0)
+        ):
+            self._speed_integral = candidate_integral
+        effort = float(np.clip(
+            self.speed_kp * error
+            + self.speed_ki * self._speed_integral
+            + self.speed_kd * speed_derivative,
+            -1.0, 1.0,
+        ))
 
-        debug = {
-            "mode": "pure_pursuit_ff_pi",
-            "target_speed_kmh": target_mps * 3.6,
-            "target_speed_filtered_kmh": target * 3.6 if not planned_stop else 0.0,
-            "lookahead_m": lookahead_m,
-            "target_idx": start_idx + target_idx,
-            "target_wp_xy": [float(path[target_idx][0]), float(path[target_idx][1])],
-            "planned_stop": planned_stop,
-            "launch": launch,
-            "integral_effort": cfg.FOLLOW_KI * self._integral,
-            "curve_limit_kmh": curve_limit * 3.6,
-        }
-        return steer, float(throttle), float(brake), debug
+        if stop_requested:
+            if current_speed_mps <= self.hold_speed_mps:
+                return 0.0, self.hold_brake, error, -self.hold_brake, True
+            brake = max(-effort, self.minimum_stop_brake)
+            return 0.0, float(np.clip(brake, 0.0, 1.0)), error, -brake, False
+        if effort >= 0.0:
+            return effort, 0.0, error, effort, False
+        return 0.0, -effort, error, effort, False
+
+    def command(
+        self, path_carla_local, current_position_local, current_yaw_local_rad,
+        current_speed_mps, time_step=cfg.CONTROL_DT, trajectory_time_index=0,
+    ):
+        path = np.asarray(path_carla_local, dtype=np.float64)
+        position = np.asarray(current_position_local, dtype=np.float64)
+        if path.ndim != 2 or path.shape[1] < 3 or not len(path):
+            raise ValueError("path must have shape [T, >=3]")
+        distances = np.linalg.norm(path[:, :2] - position[:2], axis=1)
+        nearest = int(np.argmin(distances))
+        candidates = np.flatnonzero(distances[nearest:] >= self.lookahead_m)
+        target_index = nearest + int(candidates[0]) if len(candidates) else len(path) - 1
+
+        delta = path[target_index, :2] - position[:2]
+        cosine, sine = np.cos(current_yaw_local_rad), np.sin(current_yaw_local_rad)
+        target_vehicle = np.array(
+            [cosine * delta[0] + sine * delta[1], -sine * delta[0] + cosine * delta[1]]
+        )
+        distance_sq = max(float(target_vehicle @ target_vehicle), 1e-6)
+        curvature = 2.0 * target_vehicle[1] / distance_sq
+        wheel_angle = np.arctan(self.wheelbase_m * curvature)
+        requested_steer = float(np.clip(
+            self.steering_gain * wheel_angle / self.max_wheel_angle_rad, -1.0, 1.0
+        ))
+        max_steer_delta = self.max_steer_rate_per_s * time_step
+        steer = float(np.clip(
+            requested_steer,
+            self._previous_steer - max_steer_delta,
+            self._previous_steer + max_steer_delta,
+        ))
+        self._previous_steer = steer
+
+        # Alpamayo waypoints are sampled at 10 Hz beginning at t0 + 0.1 s. Longitudinal
+        # control therefore follows trajectory time, independent of the spatial
+        # pure-pursuit point selected above for steering.
+        deltas = np.diff(np.vstack([np.zeros((1, 3)), path[:, :3]]), axis=0)
+        speeds = np.linalg.norm(deltas[:, :2], axis=1) / time_step
+        speed_index = min(max(int(trajectory_time_index), 0), len(speeds) - 1)
+        target_speed = float(speeds[speed_index])
+        throttle, brake, speed_error, effort, hold_active = self._longitudinal_command(
+            target_speed, current_speed_mps, time_step
+        )
+        if target_speed <= self.stop_target_speed_mps:
+            target_speed = 0.0
+        return ControlCommand(
+            throttle, brake, steer, target_speed, target_index, requested_steer,
+            speed_index, speed_error, effort, hold_active,
+        )
