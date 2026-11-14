@@ -58,8 +58,9 @@ Output: `carla_alpamayo_open_loop_result.mp4`
 The model drives the ego vehicle through the tracker of CARLA's official Alpamayo
 example: pure-pursuit steering to a point 3 m ahead on the plan and a PID on the
 plan's speed at the current 0.1 s step. Until the first plan after a spawn or
-respawn, the ego coasts on a 0.25 bootstrap throttle. Two CARLA 0.9.16 calibrations
-are added: a throttle feedforward measured for the 0.9.16 MKZ, which barely moves on
+respawn, the ego coasts on a bootstrap throttle: 0.45 rather than the official 0.25,
+which leaves the 0.9.16 MKZ in neutral until after the first plan. Two more CARLA
+0.9.16 calibrations are added: a throttle feedforward measured for the 0.9.16 MKZ, which barely moves on
 the official PID alone, and, when replanning every tick, the speed target is read 1 s
 ahead on the plan (the first 0.1 s step is below the stop speed from rest).
 A plan made at rest that starts moving within 3 s (`TRACKER_LAUNCH_WINDOW_S`) is

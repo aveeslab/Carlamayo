@@ -57,8 +57,10 @@ CONTROL_DT = 0.1
 # Alpamayo example executes 10 (1 s) with the simulation paused during inference.
 CONTROL_STEPS = 1
 # Throttle while the first observation window fills after a spawn or respawn (the
-# official example's bootstrap), so the first plan does not start from rest.
-BOOTSTRAP_THROTTLE = 0.25
+# official example's bootstrap), so the first plan does not start from rest. The
+# official 0.25 leaves the 0.9.16 MKZ in neutral for 1.6 s, past the 1.5 s window of
+# versions 1, 1.5 and 2; 0.45 engages first gear after 0.9 s.
+BOOTSTRAP_THROTTLE = 0.45
 
 # Async closed loop: brake instead of following a prediction older than this
 # (simulation seconds since its inputs were captured).
