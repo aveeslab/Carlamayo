@@ -18,15 +18,21 @@ CARLAInterface = carla_interface.CARLAInterface
 
 
 class FakeImage:
+    height, width = 2, 3
+
     def __init__(self, value):
         self.raw_data = np.full((2, 3, 4), value, dtype=np.uint8).tobytes()
 
 
-def test_get_camera_images_uses_only_the_ticked_frame(monkeypatch):
-    monkeypatch.setattr(carla_interface.cfg, "IMG_HEIGHT", 2)
-    monkeypatch.setattr(carla_interface.cfg, "IMG_WIDTH", 3)
+class IdentityLens:
+    def remap(self, image):
+        return image
+
+
+def test_get_camera_images_uses_only_the_ticked_frame():
     carla_if = CARLAInterface()
     carla_if.camera_order = ["cam_a", "cam_b"]
+    carla_if.lenses = {"cam_a": IdentityLens(), "cam_b": IdentityLens()}
     for frame, name, value in [(6, "cam_a", 1), (7, "cam_b", 2), (7, "cam_a", 3)]:
         carla_if.sensor_queue.put((frame, name, FakeImage(value)))
     carla_if.frame_id = 7

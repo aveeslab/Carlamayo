@@ -5,22 +5,20 @@ import json
 
 import carla
 import cv2
-import numpy as np
 
 from module.adapters._rigs import SEVEN_CAMERA_RIG
-from module.carla_interface import camera_transforms
+from module.carla_interface import camera_transforms, fisheye_camera_blueprint, fisheye_rgb
 from module.data_collection import (
     collect_synchronous_sensor_frame,
     frame_file_path,
     frame_is_complete,
 )
+from module.fisheye import FisheyeLens
 
 # ==============================================================================
 # Configuration
 # ==============================================================================
 OUTPUT_DIR = "carla_data"
-IMAGE_WIDTH = 1920
-IMAGE_HEIGHT = 1080
 FPS = 10
 FIXED_DELTA_SECONDS = 1.0 / FPS  # 0.1s
 WARMUP_SECONDS = 2.0  # Drive briefly before recording sensor data.
@@ -178,13 +176,9 @@ def main():
         sensor_queue = queue.Queue()
 
         transforms = camera_transforms(ego_vehicle, SENSOR_CONFIGS)
-        for name, cfg in SENSOR_CONFIGS.items():
-            cam_bp = bp_lib.find("sensor.camera.rgb")
-            cam_bp.set_attribute("image_size_x", str(IMAGE_WIDTH))
-            cam_bp.set_attribute("image_size_y", str(IMAGE_HEIGHT))
-            cam_bp.set_attribute("fov", str(cfg["fov"]))
-            cam_bp.set_attribute("sensor_tick", "0.0")
-
+        lenses = {name: FisheyeLens(cam) for name, cam in SENSOR_CONFIGS.items()}
+        for name, lens in lenses.items():
+            cam_bp = fisheye_camera_blueprint(bp_lib, lens)
             sensor = world.spawn_actor(cam_bp, transforms[name], attach_to=ego_vehicle)
             sensor.listen(lambda data, n=name: sensor_callback(data, sensor_queue, n))
             actor_list.append(sensor)
@@ -243,9 +237,7 @@ def main():
                 if "lidar" in name:
                     data.save_to_disk(frame_file_path(OUTPUT_DIR, name, frame_id))
                 else:
-                    array = np.frombuffer(data.raw_data, dtype=np.dtype("uint8"))
-                    array = np.reshape(array, (data.height, data.width, 4))
-                    array = array[:, :, :3]
+                    array = cv2.cvtColor(fisheye_rgb(data, lenses[name]), cv2.COLOR_RGB2BGR)
                     filename = frame_file_path(OUTPUT_DIR, name, frame_id)
                     if not cv2.imwrite(filename, array):
                         print(f"Warning: Failed to write image for {name} frame {frame_id}.")

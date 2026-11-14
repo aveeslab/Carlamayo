@@ -12,6 +12,7 @@ import numpy as np
 from . import config as cfg
 from .adapters._rigs import BODY_CLEARANCE_CAMERAS
 from .data_collection import collect_synchronous_sensor_frame
+from .fisheye import FisheyeLens
 from .open_loop_dataset import build_ego_history
 
 
@@ -45,6 +46,23 @@ def camera_transforms(vehicle, camera_configs):
     return transforms
 
 
+def fisheye_camera_blueprint(bp_lib, lens):
+    """``sensor.camera.rgb`` blueprint for the pinhole rendered behind ``lens``."""
+    cam_bp = bp_lib.find("sensor.camera.rgb")
+    cam_bp.set_attribute("image_size_x", str(lens.width))
+    cam_bp.set_attribute("image_size_y", str(lens.height))
+    cam_bp.set_attribute("fov", str(lens.fov))
+    cam_bp.set_attribute("enable_postprocess_effects", str(cfg.CAMERA_ENABLE_POSTPROCESS_EFFECTS))
+    cam_bp.set_attribute("sensor_tick", "0.0")
+    return cam_bp
+
+
+def fisheye_rgb(image, lens):
+    """RGB Kannala-Brandt image from one rendered CARLA pinhole ``image``."""
+    bgra = np.frombuffer(image.raw_data, dtype=np.uint8).reshape(image.height, image.width, 4)
+    return cv2.cvtColor(lens.remap(bgra), cv2.COLOR_BGRA2RGB)
+
+
 class CARLAInterface:
     """Interface for CARLA simulation."""
 
@@ -73,6 +91,7 @@ class CARLAInterface:
             camera_configs = FOUR_CAMERA_RIG
         self.camera_configs = dict(camera_configs)
         self.camera_order = list(self.camera_configs)
+        self.lenses = {}
 
     def connect(self, host="localhost", port=2000):
         print(f"Connecting to CARLA at {host}:{port}...")
@@ -241,20 +260,15 @@ class CARLAInterface:
         bp_lib = self.world.get_blueprint_library()
         transforms = camera_transforms(self.ego_vehicle, self.camera_configs)
         for name, cfg_cam in self.camera_configs.items():
-            print(f"  - spawning {name}")
-            cam_bp = bp_lib.find("sensor.camera.rgb")
-            cam_bp.set_attribute("image_size_x", str(cfg.IMG_WIDTH))
-            cam_bp.set_attribute("image_size_y", str(cfg.IMG_HEIGHT))
-            cam_bp.set_attribute("fov", str(cfg_cam["fov"]))
-            cam_bp.set_attribute("enable_postprocess_effects", str(cfg.CAMERA_ENABLE_POSTPROCESS_EFFECTS))
-            cam_bp.set_attribute("sensor_tick", "0.0")
-
+            lens = self.lenses[name] = FisheyeLens(cfg_cam)
+            print(f"  - spawning {name} (pinhole {lens.width}x{lens.height}, {lens.fov:.1f} deg)")
+            cam_bp = fisheye_camera_blueprint(bp_lib, lens)
             sensor = self.world.spawn_actor(cam_bp, transforms[name], attach_to=self.ego_vehicle)
             sensor.listen(lambda data, n=name: self.sensor_queue.put((data.frame, n, data)))
             self.sensors[name] = sensor
             time.sleep(0.2)
 
-        print(f"Setup {len(self.sensors)} cameras ({cfg.IMG_WIDTH}x{cfg.IMG_HEIGHT})")
+        print(f"Setup {len(self.sensors)} fisheye cameras ({cfg.IMG_WIDTH}x{cfg.IMG_HEIGHT})")
 
     def setup_collision_sensor(self):
         print("Setting up collision sensor...")
@@ -305,12 +319,9 @@ class CARLAInterface:
         missing = [name for name in self.camera_order if name not in frame_data]
         if missing:
             raise TimeoutError(f"Missing camera frames: {missing}")
-        images = []
-        for name in self.camera_order:
-            array = np.frombuffer(frame_data[name].raw_data, dtype=np.uint8)
-            array = array.reshape((cfg.IMG_HEIGHT, cfg.IMG_WIDTH, 4))[:, :, :3]
-            images.append(cv2.cvtColor(array, cv2.COLOR_BGR2RGB))
-        return np.array(images)
+        return np.array(
+            [fisheye_rgb(frame_data[name], self.lenses[name]) for name in self.camera_order]
+        )
 
     def get_ego_state(self):
         transform = self.ego_vehicle.get_transform()

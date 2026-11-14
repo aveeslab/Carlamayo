@@ -137,10 +137,10 @@ def test_answer_extraction_strips_special_tokens():
     assert a15.extract_answer_text(extra) == "The light is red."
 
 
-def test_rig_fov_keeps_the_calibrated_center_focal_length():
+def test_rig_carries_the_official_kannala_brandt_lens():
     from module.adapters._rigs import SEVEN_CAMERA_RIG
 
-    # Pinhole focal length (px at 1920 wide) must equal the f-theta calibration.
-    fov = SEVEN_CAMERA_RIG["camera_front_wide_120fov"]["fov"]
-    assert 960 / np.tan(np.radians(fov / 2)) == pytest.approx(925.540742)
-    assert SEVEN_CAMERA_RIG["camera_front_tele_30fov"]["fov"] == pytest.approx(29.2, abs=0.1)
+    front_wide = SEVEN_CAMERA_RIG["camera_front_wide_120fov"]
+    assert front_wide["focal_px"] == pytest.approx(925.540742)
+    assert (front_wide["cx"], front_wide["cy"]) == pytest.approx((957.85292258, 537.02554301))
+    assert all(len(cam["kb"]) == 4 for cam in SEVEN_CAMERA_RIG.values())

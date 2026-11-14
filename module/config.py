@@ -6,6 +6,10 @@
 IMG_HEIGHT = 1080
 IMG_WIDTH = 1920
 IMG_CHANNELS = 3
+# Cap on the pinhole render width behind each Kannala-Brandt camera (module.fisheye).
+# The 120-degree cameras need ~4550 px for the full center focal length; 2880 keeps
+# them at ~0.65x of it, still about twice the resolution the models consume.
+FISHEYE_RENDER_MAX_WIDTH = 2880
 # Offscreen Epic rendering can flicker heavily with CARLA camera postprocess bloom/exposure.
 CAMERA_ENABLE_POSTPROCESS_EFFECTS = True
 NUM_HISTORY = 16

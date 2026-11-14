@@ -10,31 +10,21 @@ import numpy as np
 import torch
 
 from module.adapters._rigs import SEVEN_CAMERA_RIG
+from module.fisheye import kb_project
 
 # Trajectories are rear-axle relative, like the calibrated rig.
 _FRONT_WIDE_CAMERA = SEVEN_CAMERA_RIG["camera_front_wide_120fov"]
 
 
-def _project_one_trajectory(
-    result,
-    points_3d,
-    img_width,
-    img_height,
-    focal_length_px,
-    camera_x,
-    camera_height,
-    line_color,
-    point_color,
-    line_thickness,
-):
-    x, y, z = points_3d[:, 0] - camera_x, points_3d[:, 1], points_3d[:, 2]
-    z_cam = z + camera_height
-    valid = x > 0.5
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        u = img_width / 2 - (y / x) * focal_length_px
-        v_temp = img_height / 2 - (z_cam / x) * focal_length_px
-        v = img_height - v_temp
+def _project_one_trajectory(result, points_3d, cam, line_color, point_color, line_thickness):
+    # Rear-axle FLU points -> camera frame (forward, right, down). The camera's small
+    # yaw/pitch/roll (< 0.5 deg for the front wide) is ignored.
+    forward = points_3d[:, 0] - cam["x"]
+    right = -points_3d[:, 1] - cam["y"]
+    down = cam["z"] - points_3d[:, 2]
+    valid = forward > 0.5
+    img_height, img_width = result.shape[:2]
+    u, v = kb_project(cam, forward, right, down, width=img_width)
 
     u = np.clip(u, 0, img_width - 1).astype(np.int32)
     v = np.clip(v, 0, img_height - 1).astype(np.int32)
@@ -55,18 +45,8 @@ def _project_one_trajectory(
         cv2.circle(result, tuple(pt), max(4, line_thickness), point_color, -1, cv2.LINE_AA)
 
 
-def project_trajectory_to_image(
-    cam_img,
-    pred_xyz,
-    selected_idx=0,
-    camera_x=_FRONT_WIDE_CAMERA["x"],
-    camera_height=_FRONT_WIDE_CAMERA["z"],
-    fov=_FRONT_WIDE_CAMERA["fov"],
-):
-    """Project one or multiple trajectories onto image."""
-    img_height, img_width = cam_img.shape[:2]
-    focal_length_px = img_width / (2 * np.tan(np.radians(fov / 2)))
-
+def project_trajectory_to_image(cam_img, pred_xyz, selected_idx=0, cam=_FRONT_WIDE_CAMERA):
+    """Project one or multiple trajectories onto a Kannala-Brandt camera image."""
     result = cam_img.copy()
     if isinstance(pred_xyz, torch.Tensor):
         arr = pred_xyz.detach().cpu().numpy()
@@ -89,11 +69,7 @@ def project_trajectory_to_image(
         _project_one_trajectory(
             result=result,
             points_3d=traj_samples[i],
-            img_width=img_width,
-            img_height=img_height,
-            focal_length_px=focal_length_px,
-            camera_x=camera_x,
-            camera_height=camera_height,
+            cam=cam,
             line_color=(255, 255, 255),
             point_color=(255, 255, 255),
             line_thickness=4,
@@ -102,11 +78,7 @@ def project_trajectory_to_image(
     _project_one_trajectory(
         result=result,
         points_3d=traj_samples[selected_idx],
-        img_width=img_width,
-        img_height=img_height,
-        focal_length_px=focal_length_px,
-        camera_x=camera_x,
-        camera_height=camera_height,
+        cam=cam,
         line_color=(255, 0, 0),
         point_color=(255, 100, 100),
         line_thickness=8,

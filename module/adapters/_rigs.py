@@ -12,20 +12,14 @@ forward, ``y`` right, ``z`` up, ``pitch`` up, ``yaw`` clockwise seen from above,
 ``roll`` right side down. ``module.carla_interface.camera_transforms`` adds the ego
 rear-axle offset at spawn time.
 
-CARLA 0.9.16 renders a pinhole lens, not the source f-theta fisheye. ``fov`` is the
-horizontal field of view of the pinhole whose focal length equals the calibrated
-f-theta focal length, so objects near the image center appear at the real camera's
-scale (a 120-degree pinhole shrinks them by ~1.7x); the outer f-theta periphery is
-not rendered.
+Lens values are the same calibration's Kannala-Brandt fit of each f-theta lens
+(focal length and principal point in pixels at 1920x1080). CARLA 0.9.16 has no
+fisheye camera, so ``module.fisheye.FisheyeLens`` renders a wide pinhole and remaps
+it into this lens.
 """
 
-import math
 
-# Width in pixels at which the focal lengths below were calibrated.
-CALIBRATION_WIDTH_PX = 1920
-
-
-def _cam(x, y_left, z, yaw_left, pitch_up, focal_px, roll_right_up):
+def _cam(x, y_left, z, yaw_left, pitch_up, focal_px, roll_right_up, principal_point, kb):
     """Convert one calibration entry (FLU, named by positive direction) to CARLA signs."""
     return {
         "x": x,
@@ -34,7 +28,10 @@ def _cam(x, y_left, z, yaw_left, pitch_up, focal_px, roll_right_up):
         "pitch": pitch_up,
         "yaw": -yaw_left,
         "roll": -roll_right_up,
-        "fov": math.degrees(2.0 * math.atan(CALIBRATION_WIDTH_PX / 2.0 / focal_px)),
+        "focal_px": focal_px,
+        "cx": principal_point[0],
+        "cy": principal_point[1],
+        "kb": kb,
     }
 
 
@@ -42,25 +39,46 @@ def _cam(x, y_left, z, yaw_left, pitch_up, focal_px, roll_right_up):
 # selects its fixed six-camera profile from this ring.
 SEVEN_CAMERA_RIG = {
     "camera_cross_left_120fov": _cam(
-        2.472564, 0.937820, 0.917814, 66.083303, -0.909268, 921.978679, 0.289044
+        2.472564, 0.937820, 0.917814, 66.083303, -0.909268, 921.978679,
+        0.289044,
+        (965.79980657, 546.77842273),
+        (-0.020325173, 0.015561344, -0.019556958, 0.008121544),
     ),
     "camera_front_wide_120fov": _cam(
-        1.696904, -0.010188, 1.435701, -0.489230, -0.443195, 925.540742, -0.155228
+        1.696904, -0.010188, 1.435701, -0.489230, -0.443195, 925.540742,
+        -0.155228,
+        (957.85292258, 537.02554301),
+        (-0.041555584, 0.067146887, -0.078102726, 0.031954250),
     ),
     "camera_cross_right_120fov": _cam(
-        2.478202, -0.954542, 0.928658, -66.837341, 1.410818, 917.283211, 0.175652
+        2.478202, -0.954542, 0.928658, -66.837341, 1.410818, 917.283211,
+        0.175652,
+        (960.73577164, 539.01147371),
+        (-0.007380577, -0.015709779, 0.017383842, -0.007038902),
     ),
     "camera_rear_left_70fov": _cam(
-        2.028755, 1.039446, 0.885386, 151.680637, -3.134268, 1570.851575, -0.666026
+        2.028755, 1.039446, 0.885386, 151.680637, -3.134268, 1570.851575,
+        -0.666026,
+        (976.85215933, 562.69828079),
+        (-0.033947816, 0.401793972, -1.702209054, 2.126361486),
     ),
     "camera_rear_tele_30fov": _cam(
-        0.382798, 0.300216, 1.433513, 179.318246, -0.600805, 3682.876071, 0.272256
+        0.382798, 0.300216, 1.433513, 179.318246, -0.600805, 3682.876071,
+        0.272256,
+        (951.05683958, 548.15984186),
+        (0.231522708, -8.797345185, 159.2215684, -1036.335972),
     ),
     "camera_rear_right_70fov": _cam(
-        2.007933, -1.005456, 0.896404, -162.200838, -1.211118, 1560.629773, -0.535919
+        2.007933, -1.005456, 0.896404, -162.200838, -1.211118, 1560.629773,
+        -0.535919,
+        (970.96068574, 549.93512723),
+        (0.009383454, 0.079461877, -0.582353954, 0.775536694),
     ),
     "camera_front_tele_30fov": _cam(
-        1.667030, 0.073855, 1.443884, -0.872023, 0.575408, 3687.248370, 0.244831
+        1.667030, 0.073855, 1.443884, -0.872023, 0.575408, 3687.248370,
+        0.244831,
+        (966.87830919, 548.33546092),
+        (0.058971681, -1.359812221, 23.21701466, -149.2217783),
     ),
 }
 SEVEN_CAMERA_INDICES = (0, 1, 2, 3, 4, 5, 6)
