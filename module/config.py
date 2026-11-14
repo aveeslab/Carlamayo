@@ -85,3 +85,13 @@ TRACKER_STOP_TARGET_SPEED_MPS = 0.25
 TRACKER_HOLD_SPEED_MPS = 0.15
 TRACKER_MIN_STOP_BRAKE = 0.25
 TRACKER_HOLD_BRAKE = 1.0
+# CARLA 0.9.16 calibration, not in the official tracker: throttle that holds a steady
+# speed on a flat road for the MKZ 2020 (linear in m/s), added to the PID effort when
+# the plan does not request a stop.
+TRACKER_FF_THROTTLE_AT_ZERO = 0.36
+TRACKER_FF_THROTTLE_PER_MPS = 0.0167
+# Replanning every tick (--control-steps 1) always sits at the plan's first 0.1 s step,
+# which from rest is below the stop speed, so the ego never pulls away. That mode reads
+# the speed this many steps ahead instead; the official cycle and --async read the
+# plan at the ticks elapsed since its inputs.
+PER_TICK_SPEED_LEAD_STEPS = 10

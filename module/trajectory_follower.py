@@ -7,6 +7,10 @@ rear axle, rate-limited, and a PID on the plan's speed at the current trajectory
 step, giving one signed effort (throttle positive, brake negative). The plan and the
 ego pose are both expressed in the CARLA-local (y right) rear-axle frame of the pose
 the plan was predicted from.
+
+One addition for CARLA 0.9.16: the effort carries a throttle feedforward measured for
+its MKZ, which needs ~0.36 throttle to move at all; the official PID alone (tuned on the
+UE5 MKZ) leaves it creeping at a few cm/s and unable to pull away from a stop.
 """
 
 from __future__ import annotations
@@ -69,6 +73,8 @@ class TrajectoryTracker:
         hold_brake=cfg.TRACKER_HOLD_BRAKE,
         steering_gain=cfg.TRACKER_STEERING_GAIN,
         max_steer_rate_per_s=cfg.TRACKER_MAX_STEER_RATE_PER_S,
+        ff_throttle_at_zero=cfg.TRACKER_FF_THROTTLE_AT_ZERO,
+        ff_throttle_per_mps=cfg.TRACKER_FF_THROTTLE_PER_MPS,
     ):
         self.wheelbase_m = wheelbase_m
         self.max_wheel_angle_rad = np.deg2rad(max_wheel_angle_deg)
@@ -83,6 +89,8 @@ class TrajectoryTracker:
         self.hold_brake = hold_brake
         self.steering_gain = steering_gain
         self.max_steer_rate_per_s = max_steer_rate_per_s
+        self.ff_throttle_at_zero = ff_throttle_at_zero
+        self.ff_throttle_per_mps = ff_throttle_per_mps
         self.reset()
 
     def reset(self):
@@ -101,6 +109,9 @@ class TrajectoryTracker:
             self._speed_integral = min(self._speed_integral, 0.0)
 
         error = target_speed_mps - current_speed_mps
+        feedforward = 0.0 if stop_requested else (
+            self.ff_throttle_at_zero + self.ff_throttle_per_mps * target_speed_mps
+        )
         speed_derivative = 0.0
         if self._previous_speed_mps is not None:
             # Derivative on measurement avoids a kick when a newly sampled trajectory
@@ -113,7 +124,8 @@ class TrajectoryTracker:
             -self.speed_integral_limit, self.speed_integral_limit,
         ))
         candidate_effort = (
-            self.speed_kp * error
+            feedforward
+            + self.speed_kp * error
             + self.speed_ki * candidate_integral
             + self.speed_kd * speed_derivative
         )
@@ -124,7 +136,8 @@ class TrajectoryTracker:
         ):
             self._speed_integral = candidate_integral
         effort = float(np.clip(
-            self.speed_kp * error
+            feedforward
+            + self.speed_kp * error
             + self.speed_ki * self._speed_integral
             + self.speed_kd * speed_derivative,
             -1.0, 1.0,

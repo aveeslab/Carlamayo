@@ -676,9 +676,12 @@ def run(adapter, args):
                     current_plan_tf, carla_if.ego_vehicle.get_transform()
                 )
                 # Step i of the plan's 0.1 s timeline, i ticks after its inputs.
+                time_index = frame_count - current_trajectory_frame
+                if not args.async_mode and control_steps == 1:
+                    time_index += cfg.PER_TICK_SPEED_LEAD_STEPS
                 command = tracker.command(
                     current_path, position, yaw, float(state["speed"]),
-                    trajectory_time_index=frame_count - current_trajectory_frame,
+                    trajectory_time_index=time_index,
                 )
                 steering, throttle, brake = command.steer, command.throttle, command.brake
                 prev_control = {"steer": steering, "throttle": throttle, "brake": brake}

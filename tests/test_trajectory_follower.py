@@ -33,6 +33,13 @@ def test_planned_stop_brakes_while_moving_and_holds_once_stopped():
     assert stopped.hold_active and stopped.brake == cfg.TRACKER_HOLD_BRAKE
 
 
+def test_throttle_feedforward_holds_the_planned_speed():
+    tracker = TrajectoryTracker()
+    command = tracker.command(_straight_path([2.0] * 64), [0, 0, 0], 0.0, 2.0)
+    feedforward = cfg.TRACKER_FF_THROTTLE_AT_ZERO + 2.0 * cfg.TRACKER_FF_THROTTLE_PER_MPS
+    assert command.throttle == pytest.approx(feedforward, abs=0.01)
+
+
 def test_pid_does_not_wind_up_into_a_saturated_pedal():
     tracker = TrajectoryTracker()
     path = _straight_path([20.0] * 64)
