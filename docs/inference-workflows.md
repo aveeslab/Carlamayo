@@ -34,6 +34,10 @@ one recording replays for any version (the four-camera Alpamayo 1 / 1.5 rig is a
 subset selected by folder name at replay time). It records only complete synchronous
 frames, matched to the exact frame returned by `world.tick()`.
 
+Camera images are Kannala-Brandt fisheye, as in CARLA's official Alpamayo example
+(rendered as a wider pinhole and remapped; see `module/fisheye.py`). Recordings made
+before this change are pinhole images; re-record them for open-loop replay.
+
 ## 2. Open-Loop Inference
 
 Replay recorded data through the model (no driving):
@@ -51,7 +55,14 @@ Output: `carla_alpamayo_open_loop_result.mp4`
 
 ## 3. Closed-Loop Inference
 
-The model drives the ego vehicle via a trajectory follower. Start CARLA:
+The model drives the ego vehicle through the tracker of CARLA's official Alpamayo
+example: pure-pursuit steering to a point 3 m ahead on the plan and a PID on the
+plan's speed at the current 0.1 s step. Until the first plan after a spawn or
+respawn, the ego coasts on a 0.25 bootstrap throttle. Two CARLA 0.9.16 calibrations
+are added: a throttle feedforward measured for the 0.9.16 MKZ, which barely moves on
+the official PID alone, and, when replanning every tick, the speed target is read 1 s
+ahead on the plan (the first 0.1 s step is below the stop speed from rest).
+Start CARLA:
 
 ```bash
 cd ~/carla
@@ -70,6 +81,15 @@ python carlamayo.py --loop closed --version 2
 > GPU (`-graphicsadapter=1`) when one GPU cannot host both.
 > On a single smaller GPU, `--max-gpu-memory-gb <GB>` keeps that much of the model on
 > each GPU and offloads the rest to CPU RAM; inference becomes much slower.
+
+By default the sync loop replans every tick. `--control-steps N` plans once and drives
+N 0.1 s steps of that plan before the next inference; `--control-steps 10` is the
+official example's cycle (inference with the simulation paused, then 1 s of control).
+It cannot be combined with `--async`.
+
+```bash
+python carlamayo.py --loop closed --version 2 --control-steps 10
+```
 
 Optional pygame UI (starts paused so you can enter navigation/VQA text first):
 

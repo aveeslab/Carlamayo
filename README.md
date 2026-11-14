@@ -34,6 +34,11 @@ Alpamayo 2 Edge needs Transformers 5, so it runs in its own environment (see
 [Environment Setup](docs/environment-setup.md)). Its driving prompt always carries a
 navigation instruction; without `--navigation-text` it uses `"Follow the road"`.
 
+Cameras follow CARLA's official Alpamayo example: NVIDIA's calibrated PhysicalAI-AV
+rig with each lens's Kannala-Brandt fisheye fit. CARLA 0.9.16 has no fisheye camera,
+so every camera renders a wider pinhole that is remapped into the calibrated
+1920x1080 fisheye image (`module/fisheye.py`).
+
 ## Loop Modes
 
 The unified `carlamayo.py` launcher selects a loop with `--loop`:
@@ -41,12 +46,15 @@ The unified `carlamayo.py` launcher selects a loop with `--loop`:
 | `--loop` | Who drives | Description |
 |----------|-----------|-------------|
 | `open`      | nobody (offline) | Replay a recorded dataset through the model; render prediction video. |
-| `closed`    | the model | Model trajectories drive the ego via a PID follower. |
+| `closed`    | the model | Model trajectories drive the ego via CARLA's official Alpamayo tracker. |
 | `live-open` | CARLA autopilot | Autopilot drives live while the model runs open-loop and is overlaid. |
 
 ```bash
 # Alpamayo 2, closed-loop control:
 python carlamayo.py --loop closed --version 2
+
+# Official CARLA Alpamayo cycle: infer (simulation paused), drive 10 steps (1 s), repeat:
+python carlamayo.py --loop closed --version 2 --control-steps 10
 
 # Alpamayo 1.5, live-open-loop (autopilot drives, model observes):
 python carlamayo.py --loop live-open --version 1.5 --async

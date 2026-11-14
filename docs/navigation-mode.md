@@ -69,6 +69,9 @@ Prepare to stop at the traffic light | 1.0
 # Non-blocking inference worker.
 python carlamayo.py --loop closed --version 1.5 --mode navigation --pygame-ui --async
 
+# Official CARLA Alpamayo cycle: plan, drive 10 steps (1 s), replan.
+python carlamayo.py --loop closed --version 1.5 --mode navigation --pygame-ui --control-steps 10
+
 # Lower VRAM model loading.
 python carlamayo.py --loop closed --version 1.5 --mode navigation --pygame-ui --quantization
 
