@@ -33,6 +33,14 @@ def test_planned_stop_brakes_while_moving_and_holds_once_stopped():
     assert stopped.hold_active and stopped.brake == cfg.TRACKER_HOLD_BRAKE
 
 
+def test_plan_from_rest_is_followed_from_its_start_unless_the_wait_is_long():
+    soon = _straight_path([0.0] * 15 + [1.0] * 49)
+    command = TrajectoryTracker().command(soon, [0, 0, 0], 0.0, 0.0, trajectory_time_index=2)
+    assert command.speed_index == 17 and command.throttle > 0.0
+    late = _straight_path([0.0] * 35 + [1.0] * 29)
+    assert TrajectoryTracker().command(late, [0, 0, 0], 0.0, 0.0).hold_active
+
+
 def test_throttle_feedforward_holds_the_planned_speed():
     tracker = TrajectoryTracker()
     command = tracker.command(_straight_path([2.0] * 64), [0, 0, 0], 0.0, 2.0)

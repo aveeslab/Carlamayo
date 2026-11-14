@@ -62,6 +62,9 @@ respawn, the ego coasts on a 0.25 bootstrap throttle. Two CARLA 0.9.16 calibrati
 are added: a throttle feedforward measured for the 0.9.16 MKZ, which barely moves on
 the official PID alone, and, when replanning every tick, the speed target is read 1 s
 ahead on the plan (the first 0.1 s step is below the stop speed from rest).
+A plan made at rest that starts moving within 3 s (`TRACKER_LAUNCH_WINDOW_S`) is
+followed from that start; otherwise every replan from rest would push the start back
+and the ego would never pull away.
 Start CARLA:
 
 ```bash

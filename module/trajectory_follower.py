@@ -8,9 +8,11 @@ step, giving one signed effort (throttle positive, brake negative). The plan and
 ego pose are both expressed in the CARLA-local (y right) rear-axle frame of the pose
 the plan was predicted from.
 
-One addition for CARLA 0.9.16: the effort carries a throttle feedforward measured for
+Two additions. For CARLA 0.9.16, the effort carries a throttle feedforward measured for
 its MKZ, which needs ~0.36 throttle to move at all; the official PID alone (tuned on the
-UE5 MKZ) leaves it creeping at a few cm/s and unable to pull away from a stop.
+UE5 MKZ) leaves it creeping at a few cm/s and unable to pull away from a stop. And a plan
+that begins at rest but starts moving within ``cfg.TRACKER_LAUNCH_WINDOW_S`` is followed
+from its start, since replanning from rest would otherwise delay that start forever.
 """
 
 from __future__ import annotations
@@ -75,6 +77,7 @@ class TrajectoryTracker:
         max_steer_rate_per_s=cfg.TRACKER_MAX_STEER_RATE_PER_S,
         ff_throttle_at_zero=cfg.TRACKER_FF_THROTTLE_AT_ZERO,
         ff_throttle_per_mps=cfg.TRACKER_FF_THROTTLE_PER_MPS,
+        launch_window_s=cfg.TRACKER_LAUNCH_WINDOW_S,
     ):
         self.wheelbase_m = wheelbase_m
         self.max_wheel_angle_rad = np.deg2rad(max_wheel_angle_deg)
@@ -91,6 +94,7 @@ class TrajectoryTracker:
         self.max_steer_rate_per_s = max_steer_rate_per_s
         self.ff_throttle_at_zero = ff_throttle_at_zero
         self.ff_throttle_per_mps = ff_throttle_per_mps
+        self.launch_window_s = launch_window_s
         self.reset()
 
     def reset(self):
@@ -189,6 +193,15 @@ class TrajectoryTracker:
         # pure-pursuit point selected above for steering.
         deltas = np.diff(np.vstack([np.zeros((1, 3)), path[:, :3]]), axis=0)
         speeds = np.linalg.norm(deltas[:, :2], axis=1) / time_step
+        # A plan beginning at rest (its first step is below the stop speed, which a moving
+        # ego cannot reach in 0.1 s) that starts moving soon is followed from that start.
+        moving = np.flatnonzero(speeds > self.stop_target_speed_mps)
+        if (
+            speeds[0] <= self.stop_target_speed_mps
+            and len(moving)
+            and moving[0] * time_step < self.launch_window_s
+        ):
+            trajectory_time_index += int(moving[0])
         speed_index = min(max(int(trajectory_time_index), 0), len(speeds) - 1)
         target_speed = float(speeds[speed_index])
         throttle, brake, speed_error, effort, hold_active = self._longitudinal_command(

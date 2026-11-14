@@ -95,3 +95,8 @@ TRACKER_FF_THROTTLE_PER_MPS = 0.0167
 # the speed this many steps ahead instead; the official cycle and --async read the
 # plan at the ticks elapsed since its inputs.
 PER_TICK_SPEED_LEAD_STEPS = 10
+# A plan made at rest often waits 1-3 s before moving. Driving only its first steps and
+# replanning from rest pushes that start back every time, so the ego never pulls away.
+# Such a plan is followed from its start when the start is within this many seconds;
+# longer waits (mostly yields) still hold.
+TRACKER_LAUNCH_WINDOW_S = 3.0
