@@ -5,8 +5,9 @@
 
 """Closed-loop runner: the selected Alpamayo model controls the ego vehicle.
 
-Every tick (or asynchronously) the model predicts a trajectory that the official
-CARLA Alpamayo tracker converts to steering/throttle/brake. Supports ``normal`` /
+Synchronously (the simulation waits during inference) the model plans every
+``--control-steps`` ticks, or asynchronously in a worker thread; the official CARLA
+Alpamayo tracker converts the plan to steering/throttle/brake. Supports ``normal`` /
 ``navigation`` / ``vqa`` modes; navigation and VQA require a version whose adapter
 advertises support.
 """
@@ -106,7 +107,10 @@ def run(adapter, args):
         print("Model loading: OOM-free CPU<->GPU demand layering (full-precision)")
     else:
         print(f"Quantization: {'ON (4-bit)' if args.quantization else 'OFF (full-precision)'}")
-    print(f"Execution: {'ASYNC' if args.async_mode else 'SYNC'}")
+    control_steps = args.control_steps or cfg.CONTROL_STEPS
+    print(
+        "Execution: " + ("ASYNC" if args.async_mode else f"SYNC, replan every {control_steps} tick(s)")
+    )
     print(f"Inference mode: {args.mode}")
     print(f"Pygame UI: {'ON' if args.pygame_ui else 'OFF'}")
     print(f"CARLA map: {cfg.CARLA_MAP}")
@@ -588,7 +592,13 @@ def run(adapter, args):
                         if args.debug_worker_traceback and latest_result.get("traceback"):
                             print(latest_result["traceback"].rstrip())
             else:
-                if observation_ready:
+                # Plan, then drive control_steps ticks of it (the official cycle at 10)
+                # before planning again; the simulation does not tick during inference.
+                replan_due = (
+                    current_trajectory_frame is None
+                    or frame_count - current_trajectory_frame >= control_steps
+                )
+                if observation_ready and (args.mode == "vqa" or replan_due):
                     images_array = stack_frame_buffer(frame_buffer, adapter.frame_ticks)
                     history_xyz, history_rot = carla_if.get_history_in_local_frame()
                     model_data = adapter.prepare_model_input(

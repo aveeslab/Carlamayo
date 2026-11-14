@@ -52,6 +52,10 @@ CAMERA_BODY_CLEARANCE_M = 0.08
 
 # Control config
 CONTROL_DT = 0.1
+# Closed loop (sync): plan once, then execute this many CONTROL_DT steps of the plan
+# before the next inference (--control-steps). 1 replans every tick; CARLA's official
+# Alpamayo example executes 10 (1 s) with the simulation paused during inference.
+CONTROL_STEPS = 1
 # Throttle while the first observation window fills after a spawn or respawn (the
 # official example's bootstrap), so the first plan does not start from rest.
 BOOTSTRAP_THROTTLE = 0.25

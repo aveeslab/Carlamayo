@@ -33,6 +33,7 @@ def test_control_and_respawn_limits_are_safe_positive_ranges():
     assert 0.0 < cfg.CONTROL_DT <= 1.0
     assert 0.0 <= cfg.BOOTSTRAP_THROTTLE <= 1.0
     assert cfg.TRACKER_HOLD_SPEED_MPS <= cfg.TRACKER_STOP_TARGET_SPEED_MPS
+    assert 1 <= cfg.CONTROL_STEPS <= cfg.TRAJECTORY_MAX_AGE_SEC / cfg.CONTROL_DT
     assert cfg.RESPAWN_COLLISION_COOLDOWN_FRAMES > 0
 
 

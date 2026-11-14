@@ -42,6 +42,13 @@ def test_parsed_defaults_and_overrides():
     assert args.output_video is None
 
 
+def test_control_steps_is_sync_closed_loop_only_and_bounded():
+    for extra in (["--async", "--control-steps", "10"], ["--control-steps", "0"],
+                  ["--control-steps", "31"]):
+        with pytest.raises(SystemExit):
+            carlamayo.main(["--version", "2", "--loop", "closed", *extra])
+
+
 def test_max_gpu_memory_caps_each_gpu_and_offloads_the_rest_to_cpu(monkeypatch):
     import torch
 

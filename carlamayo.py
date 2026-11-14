@@ -18,6 +18,7 @@ module with a preset loop for backward compatibility.
 
 import argparse
 
+from module import config as cfg
 from module.adapters import SUPPORTED_VERSIONS, get_adapter
 
 LOOPS = ("open", "closed", "live-open")
@@ -81,6 +82,10 @@ def build_parser(preset_loop=None):
     # Closed-loop / live-open options.
     parser.add_argument("--async", dest="async_mode", action="store_true",
                         help="[closed, live-open] Non-blocking background inference worker.")
+    parser.add_argument("--control-steps", type=int, default=None,
+                        help="[closed, sync] 0.1 s control steps driven per plan before the "
+                             "next inference; 10 is CARLA's official Alpamayo cycle. "
+                             f"Unset: {cfg.CONTROL_STEPS} (replan every tick).")
     parser.add_argument("--pygame-ui", action="store_true",
                         help="[closed] Pygame camera UI with prompt input and pause/resume.")
     parser.add_argument("--mode", choices=("normal", "navigation", "vqa"), default="normal",
@@ -103,6 +108,13 @@ def main(argv=None, preset_loop=None):
     parser = build_parser(preset_loop=preset_loop)
     args = parser.parse_args(argv)
     loop = preset_loop or args.loop
+    if args.control_steps is not None:
+        if args.async_mode:
+            parser.error("--control-steps is for the sync closed loop; drop --async.")
+        # A plan older than TRAJECTORY_MAX_AGE_SEC is not followed.
+        max_steps = round(cfg.TRAJECTORY_MAX_AGE_SEC / cfg.CONTROL_DT)
+        if not 1 <= args.control_steps <= max_steps:
+            parser.error(f"--control-steps must be between 1 and {max_steps}.")
 
     adapter = get_adapter(args.version)
 
